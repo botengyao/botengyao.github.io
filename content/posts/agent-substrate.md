@@ -1,5 +1,5 @@
 ---
-title: "Agent Substrate: Running a Billion Sleeping Agents on Kubernetes"
+title: "Agent Substrate: Running a Million Sleeping Agents on Kubernetes"
 date: 2026-07-11T23:30:00+08:00
 draft: false
 tags: ["kubernetes", "ai-agents", "infrastructure", "distributed-systems"]
