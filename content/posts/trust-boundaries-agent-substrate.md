@@ -2,11 +2,13 @@
 title: "Share Mechanisms Broadly, Share Authority Narrowly"
 date: 2026-07-25T14:00:00+08:00
 draft: false
-tags: ["security", "ai-agents", "infrastructure", "multi-tenancy", "envoy", "distributed-systems"]
-summary: "A sentence I wrote about TLS interception was wrong, and correcting it settled an architecture argument I'd been having separately: whether the L7 proxy belongs on every node."
+tags: ["security", "ai-agents", "infrastructure", "multi-tenancy", "envoy", "distributed-systems", "learning-notes"]
+summary: "Learning notes: a sentence I believed about TLS interception was wrong, and working out why settled a separate architecture question — whether the L7 proxy belongs on every node."
 ---
 
-I spent a while convinced of a sentence that turned out to be wrong. Correcting it settled an architecture argument I had been having separately, about where the L7 proxy should run in a multi-tenant agent platform. The two turned out to be the same question, which is why they are in the same post.
+*These are learning notes rather than settled advice. I am working through how trust boundaries should sit in a multi-tenant agent platform, and writing it down is how I find the holes. Some of it will turn out to be wrong, as the first half of this post demonstrates.*
+
+I spent a while convinced of a sentence that turned out to be wrong. Working out why settled an architecture question I had been circling separately, about where the L7 proxy should run. The two turned out to be the same question, which is why they are in the same post.
 
 ## The sentence
 
@@ -14,7 +16,7 @@ The setup is a platform where agent sessions migrate between machines many times
 
 > The gateway is trusted with availability, and trusted with nothing about identity.
 
-A reviewer took that apart, and he was right to.
+It does not survive contact with what a terminating proxy actually does.
 
 A proxy that terminates TLS and re-originates is not passing your connection along. It is an endpoint on both sides: facing the agent it behaves exactly like the destination server, and facing the destination it behaves exactly like the agent. In between there is a moment where the request exists as plaintext in that process's memory. From there the gateway can read everything, rewrite requests, drop or reorder them, fabricate responses and attribute them to the agent, and — unless client identity is separately signed and bound to each request — impersonate clients to the agents themselves.
 
@@ -375,6 +377,4 @@ Node-local capture, transport machinery, stateless policy binaries and public tr
 
 It also explains why the correction at the top of this post and the placement argument at the bottom are the same argument. Once you accept that a TLS-terminating proxy is fully trusted for the traffic it terminates, where it runs stops being a question about latency and becomes a question about how many tenants you are willing to put inside one trust boundary. For a platform with a thousand tenants the question was never whether one proxy could technically hold a thousand certificates and routes. It probably can. The question is whether one process should own that much authority and that much shared fate.
 
----
-
-*A companion to my field guide,* Designing a Secure Multi-Tenant Agent Substrate*, and a follow-up to [the paging architecture]({{< ref "agent-substrate" >}}) that makes migrating agent sessions possible in the first place. Thanks to the reviewer who pushed back on the trust characterization in the first draft.*
+That is where my thinking currently sits. The part I am least sure of is the revocation story for a workload that migrates faster than any network policy can follow, which I suspect is the next thing I have wrong.
