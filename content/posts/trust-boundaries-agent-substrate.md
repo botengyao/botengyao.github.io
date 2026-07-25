@@ -66,9 +66,11 @@ So a per-session certificate prevents exactly one thing. The gateway cannot go s
 
 The version I would defend now:
 
-> The gateway is trusted for the confidentiality and integrity of the traffic it terminates. What it is denied is credential authority. Compromise it and the attacker controls traffic passing through that gateway, but gains no portable identity and no reach into sessions that never traversed it.
+> The gateway is trusted for the confidentiality and integrity of every flow it terminates. Per-session identity keeps the agent's long-lived private key out of the gateway, but it does not eliminate portable authority: any bearer token, API key, or replayable credential exposed in plaintext can still be stolen and used elsewhere. Compromise controls the traffic that traverses the gateway and any exportable credentials that traffic carries; it does not automatically confer session identities or signing authority that never reached it.
 
-The distinction that survives is not how much power the gateway has over a request in front of it, but whether that power is exportable — usable later, usable elsewhere, usable against sessions it never saw. Scoping credentials per session does nothing to shrink in-path authority. It stops in-path authority from becoming portable authority. That turns out to be the same axis that decides where the proxy should run, which I'll come back to.
+That second clause matters more than it looks, and I had to walk back a stronger version of this paragraph to get it right. My first instinct was that per-session credentials stop in-path authority from becoming portable authority. They do not. They prevent one specific form of in-path authority — possession of the agent's private key — from becoming portable. Eliminating other portable authority requires sender-constrained credentials, request signing, or credential injection beyond the terminating proxy.
+
+The point lands hardest on the egress path discussed later. A model provider API key is portable authority in its purest form: long-lived, bearer-shaped, valid from anywhere, and useful to an attacker long after the connection that leaked it is gone. If your gateway injects provider credentials — and mine does — then it handles precisely the class of secret that its per-session certificate scoping does nothing to protect. What remains true, and is still worth building for, is narrower: compromise does not hand over identities and signing keys belonging to sessions that never passed through that gateway.
 
 If you want the stronger property, transport security cannot give it to you, because the gateway is an endpoint of that transport. You have to sign above it: the client signs method, target identity, body hash, nonce and expiry; the agent verifies that itself rather than taking the gateway's word for it; the agent signs its response bound to the request ID. One detail is easy to miss, which is that replay protection has to survive checkpoint and restore, since restoring an older snapshot silently reopens a replay window you thought was closed. This costs latency and SDK surface, and deciding not to pay for it is reasonable. Describing your system as though you had paid for it is not.
 
@@ -162,13 +164,13 @@ Everything above is about how much a TLS-terminating component is trusted. That 
 
 The pattern worth borrowing is the one sidecar-less meshes converged on, though not for the reason it usually gets cited. People summarize it as one proxy per node instead of one per pod, which misses the part that matters. The important move is the split: a node-local L4 layer handling identity, capture and secure transport, and a separate L7 layer handling TLS termination, protocol policy and routing.
 
-That split is about function, not about which binary you run. Envoy is entirely capable of the L4 role — TCP proxy and network filters, no HTTP connection manager, no termination of application TLS — and using it in both places keeps one data plane, one configuration language and one operational story across the platform, which is worth a lot in practice. Some meshes ship a smaller purpose-built proxy for the node instead, and the argument for that is a reduced attack surface on the component running on every host. It is a reasonable hardening choice, but a second-order one. What actually constrains the blast radius is what the node-local component is permitted to do: give Envoy an L4-only configuration, no interception CA, and no application TLS termination, and it holds exactly the same narrow authority as any purpose-built alternative. The scope is the control; the binary is an implementation detail.
+That split is about function, not about which binary you run. Envoy is entirely capable of the L4 role — TCP proxy and network filters, no HTTP connection manager, no termination of application TLS — and using it in both places keeps one data plane, one configuration language and one operational story across the platform, which is worth a lot in practice. Some meshes ship a smaller purpose-built proxy for the node instead, and the argument for that is a reduced attack surface on the component running on every host. It is a reasonable hardening choice, but a second-order one. What actually constrains the blast radius is what the node-local component is permitted to do: give Envoy an L4-only configuration, no interception keys, and no application TLS termination, and it can be configured with the same intended data-plane authority, although a purpose-built proxy may still have a smaller binary and extension attack surface. Configuration scope is the primary control. The binary is a secondary one, not a non-existent one.
 
 The second detail is that the tunnel carries the application stream opaquely. Wrap the workload's TCP stream in an HTTP/2 CONNECT tunnel protected by mTLS, which is the usual construction, and if the application inside is speaking HTTPS then that inner session stays encrypted straight through the node layer.
 
 Which gives the correction I find myself repeating most often: mTLS is not MITM. Mesh mTLS protects the link and tells you which workload is talking. Enforcing anything about HTTP paths, tool names, model IDs or token budgets requires plaintext, which means something was explicitly authorized to terminate the application's own TLS. Every "we have mTLS, so we have visibility into agent traffic" claim dies there.
 
-Now the placement argument. A bare-metal node already owns a large failure domain — compromise it and you get every sandbox on it, its local identities, its cached state. That is unavoidable; it is the physics of sharing a host. Authorized TLS termination owns a different failure domain: the plaintext of every tenant whose traffic it decrypts, plus the interception CA material and private keys it holds to do so. Put a full L7 interception proxy on every node and those two domains merge. Every host compromise becomes a plaintext and key compromise for whichever tenants happened to be scheduled there — and placement is a scheduling decision, not a security decision, which means you have handed your trust boundaries to the scheduler, and it will redraw them on every rebalance.
+Now the placement argument. A bare-metal node already owns a large failure domain — compromise it and you get every sandbox on it, its local identities, its cached state. That is unavoidable; it is the physics of sharing a host. Authorized TLS termination owns a different failure domain: the plaintext of every tenant whose traffic it decrypts, plus the leaf certificates and private keys it holds to do so. Put a full L7 interception proxy on every node and those two domains merge. Every host compromise becomes a plaintext and key compromise for whichever tenants happened to be scheduled there — and placement is a scheduling decision, not a security decision, which means you have handed your trust boundaries to the scheduler, and it will redraw them on every rebalance.
 
 <figure>
 <svg width="100%" viewBox="0 0 760 430" role="img" xmlns="http://www.w3.org/2000/svg" style="max-width:760px">
@@ -188,7 +190,7 @@ Now the placement argument. A bare-metal node already owns a large failure domai
 <rect x="42" y="180" width="184" height="50" rx="6" fill="#f6f8fa" stroke="#57606a"/>
 <text x="134" y="200" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#1f2328" text-anchor="middle">node L4 agent</text>
 <text x="134" y="216" font-family="system-ui,sans-serif" font-size="10.5" fill="#57606a" text-anchor="middle">identity · capture · tunnel</text>
-<text x="134" y="264" font-family="system-ui,sans-serif" font-size="11" font-style="italic" fill="#0F6E56" text-anchor="middle">no plaintext · no CA keys</text>
+<text x="134" y="264" font-family="system-ui,sans-serif" font-size="11" font-style="italic" fill="#0F6E56" text-anchor="middle">no TLS termination · no keys</text>
 <line x1="248" y1="205" x2="322" y2="205" stroke="#57606a" stroke-width="1.5" marker-end="url(#a2)"/>
 <text x="285" y="196" font-family="system-ui,sans-serif" font-size="10.5" fill="#57606a" text-anchor="middle">authenticated</text>
 <text x="285" y="222" font-family="system-ui,sans-serif" font-size="10.5" fill="#57606a" text-anchor="middle">tunnel</text>
@@ -222,7 +224,7 @@ Now the placement argument. A bare-metal node already owns a large failure domai
 <text x="380" y="382" font-family="system-ui,sans-serif" font-size="11.5" fill="#57606a" text-anchor="middle">shard compromise → that shard's tenants' plaintext and keys</text>
 <text x="380" y="406" font-family="system-ui,sans-serif" font-size="11.5" font-weight="600" fill="#8C1D1D" text-anchor="middle">a per-node L7 proxy would make each imply the other</text>
 </svg>
-<figcaption>Node-local components hold no plaintext and no CA material. Termination is concentrated in tenant-affine shards whose blast radius is a placement decision rather than a scheduling accident.</figcaption>
+<figcaption>When the inner application connection remains TLS-encrypted, node-local components hold neither application plaintext nor interception keys. Termination is concentrated in tenant-affine shards whose blast radius is a placement decision rather than a scheduling accident.</figcaption>
 </figure>
 
 ## Ingress and egress are not the same problem
@@ -236,7 +238,7 @@ Ingress is the outside calling in — a user's browser or application reaching a
 <figure>
 <svg width="100%" viewBox="0 0 720 336" role="img" xmlns="http://www.w3.org/2000/svg" style="max-width:720px">
 <title>Ingress and egress paths and their separate certificate authorities</title>
-<desc>On ingress, an external user reaches an edge gateway holding a public certificate for your own domain, which wakes and reaches the agent session. On egress, the agent leaves through the node L4 layer to an egress shard holding a private interception CA that mints certificates for third-party hostnames.</desc>
+<desc>On ingress, an external user reaches an edge gateway holding a public certificate for your own domain, which wakes and reaches the agent session. On egress, the agent leaves through the node L4 layer to an egress shard that receives leaf certificates over SDS and terminates TLS for approved third-party hostnames. The signing key stays in the certificate service.</desc>
 <defs>
 <marker id="m4g" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#57606a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
 </defs>
@@ -265,8 +267,8 @@ Ingress is the outside calling in — a user's browser or application reaching a
 <text x="228" y="252" font-family="system-ui,sans-serif" font-size="10" fill="#0F6E56" text-anchor="middle">binds identity</text>
 <rect x="312" y="206" width="188" height="66" rx="6" fill="#FDF0EF" stroke="#B22B2B"/>
 <text x="406" y="228" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#8C1D1D" text-anchor="middle">egress shard</text>
-<text x="406" y="245" font-family="system-ui,sans-serif" font-size="10" fill="#B22B2B" text-anchor="middle">private interception CA</text>
-<text x="406" y="261" font-family="system-ui,sans-serif" font-size="10" fill="#B22B2B" text-anchor="middle">mints leaf for their hostname</text>
+<text x="406" y="245" font-family="system-ui,sans-serif" font-size="10" fill="#B22B2B" text-anchor="middle">leaf certificates via SDS</text>
+<text x="406" y="261" font-family="system-ui,sans-serif" font-size="10" fill="#B22B2B" text-anchor="middle">terminates TLS for approved hostnames</text>
 <rect x="536" y="212" width="156" height="54" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
 <text x="614" y="235" font-family="system-ui,sans-serif" font-size="12" fill="#1f2328" text-anchor="middle">third party</text>
 <text x="614" y="252" font-family="system-ui,sans-serif" font-size="10" fill="#57606a" text-anchor="middle">not yours</text>
@@ -296,7 +298,7 @@ Both candidates for that role are multi-tenant. Both run one Envoy process servi
 | | On the node | At a remote endpoint |
 |---|---|---|
 | Who shares the process | Whoever the scheduler placed here | Whoever you assigned |
-| Isolation tiers | Not expressible | Dedicated shards where needed |
+| Isolation tiers | Coarse and scheduler-coupled | Dedicated shards where needed |
 | Private keys | On every host | Only in the L7 tier |
 | Host compromise costs | Plaintext and keys for local tenants | Sandboxes only |
 | Added latency | Effectively zero | One network hop |
@@ -308,7 +310,7 @@ Both candidates for that role are multi-tenant. Both run one Envoy process servi
 <figure>
 <svg width="100%" viewBox="0 0 720 372" role="img" xmlns="http://www.w3.org/2000/svg" style="max-width:720px">
 <title>Where interception keys live under each topology</title>
-<desc>With L7 on every node, every host holds interception keys, so the number of key holders equals the host count. With a sharded L7 tier, hosts hold no keys and only a small number of shards do.</desc>
+<desc>With L7 on every node, every host holds leaf certificates and their private keys, so the number of leaf-key holders equals the host count. With a sharded L7 tier, hosts hold no keys and only a small number of shards do. The CA signing key stays in the certificate service either way.</desc>
 <rect x="1" y="1" width="718" height="370" rx="10" fill="#ffffff" stroke="#d0d7de"/>
 <line x1="360" y1="24" x2="360" y2="290" stroke="#d0d7de" stroke-dasharray="5 4"/>
 <text x="180" y="40" font-family="system-ui,sans-serif" font-size="13" font-weight="600" fill="#8C1D1D" text-anchor="middle">L7 on every node</text>
@@ -329,7 +331,7 @@ Both candidates for that role are multi-tenant. Both run one Envoy process servi
 <rect x="210" y="164" width="90" height="22" rx="4" fill="#B22B2B"/>
 <text x="255" y="179" font-family="system-ui,sans-serif" font-size="10.5" font-weight="600" fill="#fff" text-anchor="middle">keys</text>
 <text x="180" y="222" font-family="system-ui,sans-serif" font-size="11.5" fill="#57606a" text-anchor="middle">… every host in the fleet</text>
-<text x="180" y="252" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#8C1D1D" text-anchor="middle">key holders = host count</text>
+<text x="180" y="252" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#8C1D1D" text-anchor="middle">leaf-key holders = host count</text>
 <text x="180" y="272" font-family="system-ui,sans-serif" font-size="11" fill="#8C1D1D" text-anchor="middle">tenant mix chosen by the scheduler</text>
 <text x="540" y="40" font-family="system-ui,sans-serif" font-size="13" font-weight="600" fill="#085041" text-anchor="middle">L7 in shards</text>
 <rect x="402" y="60" width="126" height="46" rx="6" fill="#f6f8fa" stroke="#0F6E56"/>
@@ -348,20 +350,20 @@ Both candidates for that role are multi-tenant. Both run one Envoy process servi
 <text x="540" y="203" font-family="system-ui,sans-serif" font-size="11.5" font-weight="600" fill="#8C1D1D" text-anchor="middle">L7 shard</text>
 <rect x="495" y="210" width="90" height="20" rx="4" fill="#B22B2B"/>
 <text x="540" y="224" font-family="system-ui,sans-serif" font-size="10.5" font-weight="600" fill="#fff" text-anchor="middle">keys</text>
-<text x="540" y="252" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#085041" text-anchor="middle">key holders = shard count</text>
+<text x="540" y="252" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#085041" text-anchor="middle">leaf-key holders = shard count</text>
 <text x="540" y="272" font-family="system-ui,sans-serif" font-size="11" fill="#085041" text-anchor="middle">tenant mix chosen by you</text>
 <line x1="24" y1="304" x2="696" y2="304" stroke="#d0d7de"/>
 <text x="360" y="330" font-family="system-ui,sans-serif" font-size="11.5" fill="#57606a" text-anchor="middle">Failure containment improves as you split into more, smaller units.</text>
-<text x="360" y="352" font-family="system-ui,sans-serif" font-size="11.5" font-weight="600" fill="#8C1D1D" text-anchor="middle">Compromise containment gets worse — every extra unit is another key holder.</text>
+<text x="360" y="352" font-family="system-ui,sans-serif" font-size="11.5" font-weight="600" fill="#8C1D1D" text-anchor="middle">Compromise containment gets worse — every extra unit is another leaf-key and plaintext holder.</text>
 </svg>
 <figcaption>The two properties pull in opposite directions, which is why "a failure only affects one node" and "a compromise only affects one node" are not the same claim.</figcaption>
 </figure>
 
-The row that matters most is the first. With a per-node L7 proxy, the set of tenants sharing a decrypting process is decided by bin-packing and re-decided on every rebalance. You cannot promise a regulated customer that their plaintext never sits in the same process as an untrusted tenant's, because you do not control who lands next door and the answer changes hourly. Remote sharding makes tenant mix an explicit and stable placement decision, which is what turns a dedicated isolation tier into something you can actually sell rather than something you hope the scheduler produces.
+The row that matters most is the first. With a per-node L7 proxy, the set of tenants sharing a decrypting process is decided by bin-packing and re-decided on every rebalance. You can still express isolation, to be fair — node pools, affinity rules, taints, dedicated hosts — but only at node granularity, and only by coupling a security boundary to the scheduler. Promising a regulated customer that their plaintext never shares a process with an untrusted tenant then means pinning them to their own node pool, which surrenders the density and locality that made per-node attractive in the first place. Remote sharding makes tenant mix an explicit and stable placement decision at a finer granularity than a host, which is what turns a dedicated isolation tier into something you can sell rather than something you configure the scheduler to approximate.
 
 Certificate economics push the same way and are less obvious. Interception needs a leaf per destination hostname, and per node, every host with a tenant calling a given host fetches and caches its own copy — the same certificate held N times across N hosts, with N times the issuance load and a poor hit rate, since each node's cache is small and starts cold. Concentrate that traffic into a shard serving fifty to a hundred tenants and the certificate is fetched once and reused constantly. Upstream connection pools behave identically: agent egress converges on a handful of model providers and tool servers, so pooling wants concentration, and per-node placement fragments precisely what benefits from being pooled.
 
-I do not want to strawman the other side, because per-node has one real advantage. When a per-node proxy dies it takes egress down for the sandboxes on that node, but those sandboxes already shared that node's fate, so the failure domain is aligned with one that already existed. A remote shard introduces a domain that cuts across nodes, and you pay for that with replicas, health checks and drain procedures. The reason I still come down on the other side is that the per-node arrangement buys its clean failure property by making every host a key holder, which is a cheap availability win traded for an expensive security loss.
+I do not want to strawman the other side, because per-node has one real advantage. When a per-node proxy dies it takes egress down for the sandboxes on that node, but those sandboxes already shared that node's fate, so the failure domain is aligned with one that already existed. A remote shard introduces a domain that cuts across nodes, and you pay for that with replicas, health checks and drain procedures. The reason I still come down on the other side is that the per-node arrangement buys its clean failure property by making every host a leaf-key holder and a plaintext holder, which is a cheap availability win traded for an expensive security loss.
 
 Latency deserves a number rather than a shrug. An extra same-zone hop costs a few hundred microseconds. Against a model provider call taking hundreds of milliseconds that is under one percent and genuinely does not matter; against a 2 ms internal RPC it is a quarter of the budget and matters a great deal. Agent egress, which is the traffic you actually want to inspect and meter, is firmly the first kind, so latency should not be allowed to overrule the security argument here. For latency-critical east-west traffic, keep it on the node and do not intercept it.
 
