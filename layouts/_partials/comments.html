@@ -1,0 +1,61 @@
+{{- with site.Params.giscus }}
+{{- if and .repo .repoId .categoryId }}
+<div class="comments-section">
+  <h2 class="comments-heading">Comments</h2>
+  <div id="giscus-container"></div>
+  <noscript>
+    <p>Comments are powered by GitHub Discussions and need JavaScript. You can
+      <a href="https://github.com/{{ .repo }}/discussions" rel="noopener">join the discussion on GitHub</a> instead.</p>
+  </noscript>
+</div>
+<script>
+  (function () {
+    var ORIGIN = 'https://giscus.app';
+    var mount = document.getElementById('giscus-container');
+    if (!mount) return;
+
+    // PaperMod marks the active theme with <html data-theme="...">. Older
+    // builds used a `dark` class on <body>, so check both, then fall back to
+    // the OS preference when neither is set (defaultTheme = "auto").
+    function siteTheme() {
+      var t = document.documentElement.getAttribute('data-theme');
+      if (t === 'dark' || t === 'light') return t;
+      if (document.body.classList.contains('dark')) return 'dark';
+      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+
+    var s = document.createElement('script');
+    s.src = ORIGIN + '/client.js';
+    s.setAttribute('data-repo', {{ .repo }});
+    s.setAttribute('data-repo-id', {{ .repoId }});
+    s.setAttribute('data-category', {{ .category | default "Announcements" }});
+    s.setAttribute('data-category-id', {{ .categoryId }});
+    s.setAttribute('data-mapping', {{ .mapping | default "pathname" }});
+    s.setAttribute('data-strict', '1');
+    s.setAttribute('data-reactions-enabled', {{ .reactionsEnabled | default "1" }});
+    s.setAttribute('data-emit-metadata', '0');
+    s.setAttribute('data-input-position', {{ .inputPosition | default "bottom" }});
+    s.setAttribute('data-lang', {{ .lang | default "en" }});
+    s.setAttribute('data-loading', 'lazy');
+    // Set at creation time so the widget never flashes the wrong theme.
+    s.setAttribute('data-theme', siteTheme());
+    s.crossOrigin = 'anonymous';
+    s.async = true;
+    mount.appendChild(s);
+
+    // Keep the widget in step with the site's theme toggle.
+    function pushTheme() {
+      var frame = document.querySelector('iframe.giscus-frame');
+      if (!frame) return;
+      frame.contentWindow.postMessage(
+        { giscus: { setConfig: { theme: siteTheme() } } }, ORIGIN);
+    }
+
+    var observer = new MutationObserver(pushTheme);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', pushTheme);
+  })();
+</script>
+{{- end }}
+{{- end }}
