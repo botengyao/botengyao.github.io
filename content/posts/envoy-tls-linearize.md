@@ -188,7 +188,11 @@ bool nextSliceCoversWrite(Buffer::Instance& write_buffer, uint64_t bytes_to_writ
 }
 ```
 
-Without that check, a chain of equal sub-16 KB slices goes wrong. Take 4097-byte slices:
+Without that check, a chain of equal sub-16 KB slices goes wrong — the slice behind the front one is short too, so nothing gets aligned.
+
+How badly depends on what 16384 leaves over. A linearize consumes whole slices until it needs part of one more, and that slice keeps `slice_size − (16384 mod slice_size)` bytes. Pick a size just above an exact divisor of 16 KB and that remainder is almost nothing: 4097 is one byte over 16384/4, so it strands **4 bytes**; 5462 is just over 16384/3 and strands **2**. Those few bytes are all the short record has to write.
+
+Taking 4097 as the worst case:
 
 ```text
 [4097][4097][4097][4097]…
@@ -211,7 +215,9 @@ Every copy is now followed by a near-empty record that aligned nothing. Measured
 | 4097 B | 17 → 32 (1.88×) |
 | 5462 B | 22 → 42 (1.90×) |
 
-Nearly double the records and `writev` syscalls, for identical bytes copied. A 2-byte TLS record still costs about 24 bytes on the wire and one full syscall. Real buffers look like this whenever framing is interleaved with data — HTTP/1 chunked encoding, small HTTP/2 frames, `addBufferFragment` chains.
+Nearly double the records and `writev` syscalls, for identical bytes copied. A 2-byte TLS record still costs about 24 bytes on the wire and one full syscall.
+
+4096 is in the table to show the problem is not about awkward remainders: it divides 16 KB exactly, so nothing is stranded, and the short record writes a whole 4096-byte slice instead. The slice behind it is still 4096, so the next write copies anyway. Any chain of equal sub-16 KB slices fails this way; the odd sizes just make it look worse. Real buffers take that shape whenever framing is interleaved with data — HTTP/1 chunked encoding, small HTTP/2 frames, `addBufferFragment` chains.
 
 The check also means a write that drains the whole buffer is never split in two, since it can only pass when data remains behind the front slice.
 
