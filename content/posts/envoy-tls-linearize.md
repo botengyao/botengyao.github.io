@@ -87,7 +87,7 @@ Call a buffer in this shape — a short slice of H bytes sitting ahead of full-s
 
 ## The fix
 
-When the previous write had to copy and this one would too, write just the contiguous front slice instead. That costs one short TLS record, after which the buffer is aligned and the writes that follow are copy-free.
+When a write would have to copy again right after the last one did, write just the contiguous front slice instead. That is one short TLS record, and from then on the buffer is aligned and the writes that follow cost no copy at all.
 
 <figure>
 <svg width="100%" viewBox="0 0 720 300" role="img" xmlns="http://www.w3.org/2000/svg" style="max-width:720px">
@@ -122,7 +122,17 @@ When the previous write had to copy and this one would too, write just the conti
 <figcaption>One short record buys permanent alignment. That is the trade the change makes.</figcaption>
 </figure>
 
-The full decision is three branches:
+### The rule, in three cases
+
+Each write asks for up to 16 KB. What happens depends on the buffer:
+
+| the buffer | what it does |
+| --- | --- |
+| front slice already holds enough | write it directly — no copy needed |
+| front slice is short, **and** the last write had to copy, **and** the slice behind it can cover the next write | write just the front slice: one short record, and the chain is aligned |
+| anything else | copy into a new slice, as before |
+
+The first case is not new — `linearize()` already returns that pointer untouched. The third is the old behaviour. Only the middle one is added:
 
 ```cpp
 if (front_slice.len_ >= bytes_to_write) {
@@ -139,9 +149,11 @@ if (avoid_repeated_linearize && linearized_last_write &&
 return {write_buffer.linearize(bytes_to_write), bytes_to_write, true};
 ```
 
-Each condition in the middle branch is load-bearing.
+All three conditions in the middle case are load-bearing. Dropping either of the last two breaks it in a different way.
 
-**`linearized_last_write` — why not a size threshold.** A natural guard would be "only write the front slice directly if it is large enough to be worth a syscall". It never fires. A threshold asks whether the front slice is *big*; the state it needs to act on is the one where the front slice is permanently *small* — held at H by the conservation shown above. The answer is no on exactly the writes where the fast path would help.
+### Why "the last write had to copy", and not a size threshold
+
+A natural guard would be "only write the front slice directly if it is large enough to be worth a syscall". It never fires. A threshold asks whether the front slice is *big*; the state it needs to act on is the one where the front slice is permanently *small* — held at H by the conservation shown above. The answer is no on exactly the writes where the fast path would help.
 
 <figure>
 <svg width="100%" viewBox="0 0 720 200" role="img" xmlns="http://www.w3.org/2000/svg" style="max-width:720px">
@@ -165,7 +177,9 @@ Each condition in the middle branch is load-bearing.
 <figcaption>A threshold tests for a large front slice. A misaligned chain never has one, so no threshold value helps.</figcaption>
 </figure>
 
-**`nextSliceCoversWrite` — why the slice behind matters.** Writing the front slice only re-aligns the buffer if the slice behind it can satisfy the next write on its own:
+### Why the slice behind it has to be checked
+
+Writing the front slice only re-aligns the buffer if the slice behind it can satisfy the next write on its own:
 
 ```cpp
 bool nextSliceCoversWrite(Buffer::Instance& write_buffer, uint64_t bytes_to_write) {
@@ -174,7 +188,22 @@ bool nextSliceCoversWrite(Buffer::Instance& write_buffer, uint64_t bytes_to_writ
 }
 ```
 
-Without it, chains that are fragmented more than one slice deep — HTTP/1 chunked framing, small HTTP/2 frames, `addBufferFragment` chains — get a short record that re-aligns nothing:
+Without that check, a chain of equal sub-16 KB slices goes wrong. Take 4097-byte slices:
+
+```text
+[4097][4097][4097][4097]…
+
+linearize(16 KB)   takes 3 whole slices (12291 B) plus 4093 B of the 4th
+                   → the 4th is left holding 4097 − 4093 = 4 B
+write 16 KB, drain
+
+[4][4097][4097]…   the short record fires and writes 4 bytes —
+                   but the slice behind it is 4097, not 16 KB
+
+[4097][4097]…      so the next write copies again, and so on
+```
+
+Every copy is now followed by a near-empty record that aligned nothing. Measured over 64 slices:
 
 | slice size | TLS records, without the check |
 | --- | --- |
@@ -182,7 +211,9 @@ Without it, chains that are fragmented more than one slice deep — HTTP/1 chunk
 | 4097 B | 17 → 32 (1.88×) |
 | 5462 B | 22 → 42 (1.90×) |
 
-Nearly double the records and `writev` syscalls, for identical bytes copied. The check also means a write that drains the whole buffer is never split in two, since it can only pass when data remains behind the front slice.
+Nearly double the records and `writev` syscalls, for identical bytes copied. A 2-byte TLS record still costs about 24 bytes on the wire and one full syscall. Real buffers look like this whenever framing is interleaved with data — HTTP/1 chunked encoding, small HTTP/2 frames, `addBufferFragment` chains.
+
+The check also means a write that drains the whole buffer is never split in two, since it can only pass when data remains behind the front slice.
 
 ## When a write doesn't go through
 
