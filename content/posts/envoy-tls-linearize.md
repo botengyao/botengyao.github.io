@@ -46,6 +46,8 @@ push    the fresh 16 KB slice at the front
 
 **The leftover is always exactly H**, for any H. The copy takes H bytes off the front and leaves H bytes behind on the next slice, so the offset is conserved rather than worn down. The short slice in the "after" state is a *different* H bytes — the tail of slice 2, not the original headers.
 
+Call a buffer in this shape — a short slice of H bytes sitting ahead of full-size ones — a **misaligned chain**. The point is that `linearize()` does not clear it. It reproduces it, so every write from then on allocates and copies 16 KB.
+
 <figure>
 <svg width="100%" viewBox="0 0 720 330" role="img" xmlns="http://www.w3.org/2000/svg" style="max-width:720px">
 <title>Why the write buffer never re-aligns</title>
@@ -139,12 +141,12 @@ return {write_buffer.linearize(bytes_to_write), bytes_to_write, true};
 
 Each condition in the middle branch is load-bearing.
 
-**`linearized_last_write` — why not a size threshold.** The obvious guard is "only write the front slice directly if it is big enough to be worth a syscall". That can never fire: the entire bug is that the front slice is small, so the guard is false exactly when it is needed.
+**`linearized_last_write` — why not a size threshold.** A natural guard would be "only write the front slice directly if it is large enough to be worth a syscall". It never fires. A threshold asks whether the front slice is *big*; the state it needs to act on is the one where the front slice is permanently *small* — held at H by the conservation shown above. The answer is no on exactly the writes where the fast path would help.
 
 <figure>
 <svg width="100%" viewBox="0 0 720 200" role="img" xmlns="http://www.w3.org/2000/svg" style="max-width:720px">
 <title>Why a size threshold can never fire</title>
-<desc>A scale of front-slice size from 0 to 16 KB. The fast path opens only above a 4 KB threshold, but the bug pins the front slice at 200 bytes, far below it, so the guard is never true.</desc>
+<desc>A scale of front-slice size from 0 to 16 KB. The fast path opens only above a 4 KB threshold, but on a misaligned chain the front slice stays at 200 bytes, far below it, so the guard is never true.</desc>
 <rect x="1" y="1" width="718" height="198" rx="10" fill="#ffffff" stroke="#d0d7de"/>
 <text x="24" y="32" font-family="system-ui,sans-serif" font-size="13" font-weight="600" fill="#1f2328">Front slice size — where each path applies</text>
 <rect x="60" y="60" width="150" height="30" fill="#FDF0EF" stroke="#B22B2B" stroke-width="1"/>
@@ -157,10 +159,10 @@ Each condition in the middle branch is load-bearing.
 <text x="660" y="114" font-family="system-ui,sans-serif" font-size="11" fill="#57606a" text-anchor="middle">16 KB</text>
 <line x1="67" y1="60" x2="67" y2="150" stroke="#B22B2B" stroke-width="2"/>
 <circle cx="67" cy="60" r="4" fill="#B22B2B"/>
-<text x="82" y="146" font-family="system-ui,sans-serif" font-size="11.5" font-weight="600" fill="#8C1D1D">actual front slice: 200 B — and it stays there</text>
-<text x="24" y="180" font-family="system-ui,sans-serif" font-size="11.5" fill="#57606a">The fast path opens at 4 KB. The bug pins the slice at 200 B. The guard is never true.</text>
+<text x="82" y="146" font-family="system-ui,sans-serif" font-size="11.5" font-weight="600" fill="#8C1D1D">front slice on a misaligned chain: 200 B, permanently</text>
+<text x="24" y="180" font-family="system-ui,sans-serif" font-size="11.5" fill="#57606a">The fast path opens at 4 KB. A misaligned chain holds the front slice at H. The guard is never true.</text>
 </svg>
-<figcaption>The condition guarding the fast path is precisely the condition the bug prevents, so no threshold value can help.</figcaption>
+<figcaption>A threshold tests for a large front slice. A misaligned chain never has one, so no threshold value helps.</figcaption>
 </figure>
 
 **`nextSliceCoversWrite` — why the slice behind matters.** Writing the front slice only re-aligns the buffer if the slice behind it can satisfy the next write on its own:
@@ -232,7 +234,7 @@ Eight alternating paired runs — baseline, fixed, baseline, fixed — so machin
 <text x="386" y="266" font-family="system-ui,sans-serif" font-size="11" fill="#57606a">no consistent direction — as intended</text>
 <text x="50" y="284" font-family="system-ui,sans-serif" font-size="10" fill="#8c959f">dashed line = median</text>
 </svg>
-<figcaption>Each bar is one baseline-versus-fixed pair. The control panel is the point: where the bug isn't present, the change does nothing.</figcaption>
+<figcaption>Each bar is one baseline-versus-fixed pair. The control panel is the point: where the buffer is not misaligned, the change does nothing.</figcaption>
 </figure>
 
 | buffer | median | spread |
