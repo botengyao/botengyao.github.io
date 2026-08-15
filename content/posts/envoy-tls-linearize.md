@@ -28,7 +28,9 @@ It reads like a fallback for an awkward case. On a proxied response it is the st
 
 ## Why it never recovers
 
-Two numbers matter, and they are the same number: the most Envoy hands to one `SSL_write()` is **16384** bytes, and `Slice::default_slice_size_` — the size of the slices the read path produces — is also **16384**.
+Two numbers matter, and they are the same number: the most Envoy hands to one `SSL_write()` is **16384** bytes, and `Slice::default_slice_size_` — the size of each slice the read path reserves — is also **16384**.
+
+That is a reservation, not a limit. `reservation.commit()` only commits what was actually read, and other paths size a slice to whatever was written into it, so slices smaller than 16 KB are ordinary. But a body streamed from a fast upstream fills them right up, and that is the shape this section is about.
 
 The short slice at the front is the response headers. `ConnectionImpl::write()` moves the codec's output into the connection buffer wholesale, so a few hundred bytes of headers land as their own slice ahead of the body's full-size ones. Call that size **H**.
 
