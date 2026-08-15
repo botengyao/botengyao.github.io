@@ -32,7 +32,21 @@ It reads like a fallback. It's the steady state.
 
 Two numbers matter, and they're the same number: the most Envoy hands to one `SSL_write()` is **16384** bytes, and `Slice::default_slice_size_` — the size of the slices the read path produces — is also **16384**.
 
-So `linearize(16384)` on a short front slice copies 16 KB into a fresh slice, drains 16 KB, and pushes the new slice to the front. That drain eats the short slice *and* bites into the next one, leaving it short by exactly the same offset.
+The short slice at the front is the response headers — `ConnectionImpl::write()` moves the codec's output in wholesale, so a few hundred bytes of headers land as their own slice ahead of the body's full-size ones. Call that size **H**; nothing below depends on its value.
+
+Now watch what `linearize(16384)` does to `[H][16384][16384]…`:
+
+```text
+copy    16384 bytes = all H of slice 1, plus (16384 − H) of slice 2
+drain   16384 bytes = pops slice 1, takes (16384 − H) off slice 2
+                    → slice 2 keeps 16384 − (16384 − H) = H bytes
+push    the fresh 16 KB slice at the front
+
+        [16 KB new][H][16384]…   →  write + drain removes the new slice
+                   [H][16384]…   ←  exactly where we started
+```
+
+**The leftover is always exactly H.** The copy takes H bytes off the front and leaves H bytes behind on the next slice, so the offset is conserved rather than worn down. The short slice in the "after" picture is a *different* H bytes — the tail of slice 2, not the original headers.
 
 <figure>
 <svg width="100%" viewBox="0 0 720 330" role="img" xmlns="http://www.w3.org/2000/svg" style="max-width:720px">
@@ -47,10 +61,11 @@ So `linearize(16384)` on a short front slice copies 16 KB into a fresh slice, dr
 <rect x="275" y="48" width="185" height="34" rx="5" fill="#f6f8fa" stroke="#57606a"/>
 <text x="367" y="70" font-family="system-ui,sans-serif" font-size="11.5" fill="#1f2328" text-anchor="middle">16 KB</text>
 <text x="474" y="70" font-family="system-ui,sans-serif" font-size="12" fill="#57606a">…</text>
-<text x="500" y="66" font-family="system-ui,sans-serif" font-size="11" fill="#8C1D1D">front slice is short</text>
+<text x="500" y="66" font-family="system-ui,sans-serif" font-size="11" fill="#8C1D1D">headers — call this H</text>
 <line x1="24" y1="104" x2="696" y2="104" stroke="#eaeef2"/>
-<text x="24" y="128" font-family="system-ui,sans-serif" font-size="11.5" fill="#57606a">linearize(16 KB): allocate 16 KB · memcpy 16 KB across the boundary · drain 16 KB · write</text>
-<line x1="24" y1="142" x2="696" y2="142" stroke="#eaeef2"/>
+<text x="24" y="122" font-family="system-ui,sans-serif" font-size="11.5" fill="#57606a">linearize(16 KB) drains all H of slice 1, then (16 KB − H) off slice 2 …</text>
+<text x="24" y="137" font-family="system-ui,sans-serif" font-size="11.5" font-weight="600" fill="#8C1D1D">… so slice 2 is left holding 16 KB − (16 KB − H) = H bytes. The offset is conserved.</text>
+<line x1="24" y1="146" x2="696" y2="146" stroke="#eaeef2"/>
 <text x="24" y="176" font-family="system-ui,sans-serif" font-size="13" font-weight="600" fill="#8C1D1D">After the write</text>
 <rect x="24" y="190" width="58" height="34" rx="5" fill="#FDF0EF" stroke="#B22B2B"/>
 <text x="53" y="212" font-family="system-ui,sans-serif" font-size="11" fill="#8C1D1D" text-anchor="middle">200 B</text>
@@ -59,11 +74,12 @@ So `linearize(16384)` on a short front slice copies 16 KB into a fresh slice, dr
 <rect x="275" y="190" width="185" height="34" rx="5" fill="#f6f8fa" stroke="#57606a"/>
 <text x="367" y="212" font-family="system-ui,sans-serif" font-size="11.5" fill="#1f2328" text-anchor="middle">16 KB</text>
 <text x="474" y="212" font-family="system-ui,sans-serif" font-size="12" fill="#57606a">…</text>
-<text x="500" y="208" font-family="system-ui,sans-serif" font-size="11" fill="#8C1D1D">short again</text>
+<text x="500" y="204" font-family="system-ui,sans-serif" font-size="11" fill="#8C1D1D">also H — but this is the</text>
+<text x="500" y="217" font-family="system-ui,sans-serif" font-size="11" fill="#8C1D1D">tail of slice 2, not the headers</text>
 <path d="M660 224 C 690 224 690 48 660 48" fill="none" stroke="#B22B2B" stroke-width="1.6"/>
 <path d="M666 54 L 658 47 L 666 41" fill="none" stroke="#B22B2B" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
 <text x="612" y="140" font-family="system-ui,sans-serif" font-size="11" font-weight="600" fill="#B22B2B" text-anchor="middle">identical shape</text>
-<text x="360" y="286" font-family="system-ui,sans-serif" font-size="11.5" fill="#57606a" text-anchor="middle">The state after the write is the state before it. No sequence of writes recovers alignment.</text>
+<text x="360" y="286" font-family="system-ui,sans-serif" font-size="11.5" fill="#57606a" text-anchor="middle">Same shape, same H, for any H. The state after the write is the state before it.</text>
 <text x="360" y="308" font-family="system-ui,sans-serif" font-size="11.5" font-weight="600" fill="#8C1D1D" text-anchor="middle">One 16 KB malloc + one 16 KB memcpy + one free, per 16 KB, for the life of the connection.</text>
 </svg>
 <figcaption>The buffer is self-similar across the operation meant to fix it. That's the whole bug.</figcaption>
