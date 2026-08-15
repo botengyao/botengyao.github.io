@@ -3,10 +3,10 @@ title: "A Copy That Never Stops Copying"
 date: 2026-08-14T10:00:00+08:00
 draft: false
 tags: ["envoy", "performance", "tls", "cpp", "buffers", "learning-notes"]
-summary: "Envoy's TLS write path re-copies 16 KB on every write, forever. The obvious fix does nothing — and why it does nothing is the whole point."
+summary: "Envoy's TLS write path re-copies 16 KB on every write, forever. The obvious fix does nothing, and my fix was wrong too — the interesting part is why each one failed."
 ---
 
-*Learning notes. I went looking for CPU waste in Envoy's hot paths, found something structural, and the fix I reached for first was useless.*
+*Learning notes. I went looking for CPU waste in Envoy's hot paths, found something structural, and then got the fix wrong twice. Both failures were more instructive than the fix.*
 
 **Envoy's TLS write path copies 16 KB for every 16 KB it sends — permanently, by construction.**
 
@@ -16,7 +16,7 @@ summary: "Envoy's TLS write path re-copies 16 KB on every write, forever. The ob
 | Cost | one 16 KB malloc + 16 KB memcpy + free, per 16 KB of TLS egress |
 | Trigger | any HTTP response: small headers in front of a full-size body |
 | Fix | emit one short TLS record, once |
-| Result | **−9.9% CPU**, copies per iteration **10 → 1** |
+| Result | **−10.3% CPU**, copies per iteration **10 → 1** |
 
 ## The line
 
@@ -125,22 +125,7 @@ A threshold can't escape a fixed point whose defining property is being under th
 
 Always writing the front slice regresses ~6% on already-aligned buffers, where one copy genuinely does fix things and small records buy nothing.
 
-So the decision can't come from the buffer's current state at all. "Front slice is short" is true in *both* the recoverable case and the fixed point. What separates them is whether the copy is about to **repeat** — one bit of history:
-
-```cpp
-if (front_slice.len_ >= bytes_to_write) {
-  // Already contiguous — linearize() would return this pointer without copying.
-  return {front_slice.mem_, bytes_to_write, false};
-}
-
-if (avoid_repeated_linearize && linearized_last_write && front_slice.len_ > 0) {
-  // Copied last time, about to copy again: this chain is a fixed point.
-  // One short record consumes the offset and aligns everything behind it.
-  return {front_slice.mem_, front_slice.len_, false};
-}
-
-return {write_buffer.linearize(bytes_to_write), bytes_to_write, true};
-```
+So the decision can't come from the buffer's current state at all. "Front slice is short" is true in *both* the recoverable case and the fixed point. What separates them is whether the copy is about to **repeat** — one bit of history.
 
 <figure>
 <svg width="100%" viewBox="0 0 720 300" role="img" xmlns="http://www.w3.org/2000/svg" style="max-width:720px">
@@ -175,16 +160,74 @@ return {write_buffer.linearize(bytes_to_write), bytes_to_write, true};
 <figcaption>One short record buys permanent alignment. That's the whole trade.</figcaption>
 </figure>
 
+That was my fix. It was also wrong, in a way that took a second pass to find.
+
+## The second wrong turn
+
+The escape assumes the short prefix is **one slice deep**. Consume it, and the full-size slice behind it lines up.
+
+Plenty of real buffers aren't shaped like that. HTTP/1 chunked framing interleaves size headers and CRLFs with the body. HTTP/2 builds a fresh buffer per frame. `addBufferFragment` chains never coalesce at all. Those produce chains of *uniformly* short slices — and there, writing the front slice re-aligns nothing. It emits a tiny record and leaves the next write to copy exactly as before.
+
+I only caught it because I wrote the test before believing the answer:
+
+| slice size | TLS records, off → on |
+| --- | --- |
+| 4096 B | 16 → 25 (1.56×) |
+| 4097 B | 17 → **32 (1.88×)** |
+| 5462 B | 22 → **42 (1.90×)** |
+
+Nearly double the records and `writev` syscalls, for **identical bytes copied**. A 2-byte TLS record is 24 bytes on the wire and one whole syscall. On those shapes my "optimization" was pure loss.
+
+The discriminator is what I should have written first. The escape is worth it exactly when it *achieves* alignment — and that is testable directly, in O(1), rather than inferred from history:
+
+```cpp
+// Whether the slice behind the front one is on its own big enough for the write that would
+// follow a short record, i.e. whether writing just the front slice actually re-aligns.
+bool nextSliceCoversWrite(Buffer::Instance& write_buffer, uint64_t bytes_to_write) {
+  const Buffer::RawSliceVector slices = write_buffer.getRawSlices(/*max_slices=*/2);
+  return slices.size() == 2 && slices[1].len_ >= bytes_to_write;
+}
+```
+
+which makes the whole decision:
+
+```cpp
+if (front_slice.len_ >= bytes_to_write) {
+  // Already contiguous — linearize() would return this pointer without copying.
+  return {front_slice.mem_, bytes_to_write, false};
+}
+
+if (avoid_repeated_linearize && linearized_last_write &&
+    nextSliceCoversWrite(write_buffer, bytes_to_write)) {
+  // Copied last time, about to copy again, and one short record fixes it. Take it.
+  return {front_slice.mem_, front_slice.len_, false};
+}
+
+return {write_buffer.linearize(bytes_to_write), bytes_to_write, true};
+```
+
+Every shape above falls back to the old path untouched, and the motivating case keeps its full win. The check also quietly subsumes a condition I had been carrying separately: it can only pass when data remains behind the front slice, so a write that drains the whole buffer is never split in two.
+
+## The state has to survive a retry
+
+`SSL_write()` can return `SSL_ERROR_WANT_WRITE`, and Envoy retries the same write later. My first version re-decided on the retry — which looks at the buffer *after* the linearize, concludes nothing was copied, and clears the history. The retry lands, the short remainder is back at the front, and it linearizes again.
+
+Worse than it sounds. When the socket accepts less than one full record per readiness event, that happens on *every* write and the optimization never engages at all: simulated over 400 events on a congested connection, the copy count was identical with the feature on and off.
+
+The fix is to stop re-deciding. A pending write is recorded with its origin and repeated verbatim — same pointer, same length, same "this came from a copy" — until it lands. BoringSSL wants the same pointer anyway, since Envoy doesn't set `SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER`.
+
+Then one ordering detail I got wrong and had to fix again: I discharged that pending state *after* `write_buffer.drain()`. But `drain()` isn't a leaf call — it runs low-watermark callbacks and slice drain trackers, which can close the connection and re-enter `doWrite` synchronously. A nested call would find a write still pending that had already landed. The code I replaced cleared its retry state at the top of the function and never depended on the ordering; mine did. Discharge first, drain second.
+
 The escape sets the flag false, so it fires at most once per copy — never a run of small records. On an aligned buffer the second branch is unreachable, so that case is untouched rather than merely "not much worse".
 
 ## Numbers
 
-Ten alternating paired runs (baseline, fixed, baseline, fixed — so interference hits both arms):
+Eight alternating paired runs (baseline, fixed, baseline, fixed — so interference hits both arms):
 
 <figure>
 <svg width="100%" viewBox="0 0 720 290" role="img" xmlns="http://www.w3.org/2000/svg" style="max-width:720px">
 <title>Per-pair CPU change, misaligned buffer versus aligned control</title>
-<desc>On the misaligned buffer all ten paired runs are faster, ranging from 6.8 to 13.9 percent, with a median of 9.9 percent. On the aligned control the ten pairs scatter above and below zero with a median of 0.6 percent, showing no consistent effect.</desc>
+<desc>On the misaligned buffer all eight paired runs are faster, ranging from 8.2 to 12.6 percent, with a median of 10.3 percent. On the aligned control the eight pairs scatter above and below zero with a median of 0.2 percent, showing no consistent effect.</desc>
 <rect x="1" y="1" width="718" height="288" rx="10" fill="#ffffff" stroke="#d0d7de"/>
 <text x="50" y="28" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#085041">Misaligned buffer</text>
 <text x="386" y="28" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#57606a">Aligned buffer (control)</text>
@@ -194,34 +237,30 @@ Ten alternating paired runs (baseline, fixed, baseline, fixed — so interferenc
 <text x="36" y="134" font-family="system-ui,sans-serif" font-size="10" fill="#57606a" text-anchor="end">−5</text>
 <text x="36" y="174" font-family="system-ui,sans-serif" font-size="10" fill="#57606a" text-anchor="end">−10</text>
 <text x="14" y="212" font-family="system-ui,sans-serif" font-size="10" fill="#57606a">faster ↓</text>
-<rect x="50" y="90" width="18" height="54.4" rx="3" fill="#0F6E56"/>
-<rect x="80" y="90" width="18" height="88" rx="3" fill="#0F6E56"/>
-<rect x="110" y="90" width="18" height="55.2" rx="3" fill="#0F6E56"/>
-<rect x="140" y="90" width="18" height="83.2" rx="3" fill="#0F6E56"/>
-<rect x="170" y="90" width="18" height="80" rx="3" fill="#0F6E56"/>
-<rect x="200" y="90" width="18" height="99.2" rx="3" fill="#0F6E56"/>
-<rect x="230" y="90" width="18" height="64.8" rx="3" fill="#0F6E56"/>
-<rect x="260" y="90" width="18" height="55.2" rx="3" fill="#0F6E56"/>
-<rect x="290" y="90" width="18" height="111.2" rx="3" fill="#0F6E56"/>
-<rect x="320" y="90" width="18" height="78.4" rx="3" fill="#0F6E56"/>
-<text x="299" y="216" font-family="system-ui,sans-serif" font-size="10" font-weight="600" fill="#085041" text-anchor="middle">−13.9</text>
-<line x1="44" y1="169.2" x2="344" y2="169.2" stroke="#085041" stroke-width="1.2" stroke-dasharray="4 3"/>
+<rect x="50" y="90" width="22" height="71.2" rx="3" fill="#0F6E56"/>
+<rect x="86" y="90" width="22" height="80" rx="3" fill="#0F6E56"/>
+<rect x="122" y="90" width="22" height="98.4" rx="3" fill="#0F6E56"/>
+<rect x="158" y="90" width="22" height="92.8" rx="3" fill="#0F6E56"/>
+<rect x="194" y="90" width="22" height="100.8" rx="3" fill="#0F6E56"/>
+<rect x="230" y="90" width="22" height="84" rx="3" fill="#0F6E56"/>
+<rect x="266" y="90" width="22" height="65.6" rx="3" fill="#0F6E56"/>
+<rect x="302" y="90" width="22" height="72" rx="3" fill="#0F6E56"/>
+<text x="205" y="205" font-family="system-ui,sans-serif" font-size="10" font-weight="600" fill="#085041" text-anchor="middle">−12.6</text>
+<line x1="44" y1="172.4" x2="344" y2="172.4" stroke="#085041" stroke-width="1.2" stroke-dasharray="4 3"/>
 <line x1="367" y1="20" x2="367" y2="222" stroke="#eaeef2"/>
-<rect x="386" y="90" width="18" height="12.8" rx="3" fill="#0F6E56"/>
-<rect x="416" y="80.4" width="18" height="9.6" rx="3" fill="#B22B2B"/>
-<rect x="446" y="74" width="18" height="16" rx="3" fill="#B22B2B"/>
-<rect x="476" y="90" width="18" height="12.8" rx="3" fill="#0F6E56"/>
-<rect x="506" y="90" width="18" height="9.6" rx="3" fill="#0F6E56"/>
-<rect x="536" y="86.8" width="18" height="3.2" rx="1.5" fill="#B22B2B"/>
-<rect x="566" y="90" width="18" height="3.2" rx="1.5" fill="#0F6E56"/>
-<rect x="596" y="90" width="18" height="6.4" rx="3" fill="#0F6E56"/>
-<rect x="626" y="90" width="18" height="9.6" rx="3" fill="#0F6E56"/>
-<rect x="656" y="89" width="18" height="2" fill="#8c959f"/>
-<line x1="380" y1="94.8" x2="690" y2="94.8" stroke="#57606a" stroke-width="1.2" stroke-dasharray="4 3"/>
+<rect x="386" y="90" width="22" height="28" rx="3" fill="#0F6E56"/>
+<rect x="422" y="89" width="22" height="2" fill="#8c959f"/>
+<rect x="458" y="86.8" width="22" height="3.2" rx="3" fill="#B22B2B"/>
+<rect x="494" y="77.2" width="22" height="12.8" rx="3" fill="#B22B2B"/>
+<rect x="530" y="67.6" width="22" height="22.4" rx="3" fill="#B22B2B"/>
+<rect x="566" y="90" width="22" height="21.6" rx="3" fill="#0F6E56"/>
+<rect x="602" y="83.6" width="22" height="6.4" rx="3" fill="#B22B2B"/>
+<rect x="638" y="90" width="22" height="6.4" rx="3" fill="#0F6E56"/>
+<line x1="380" y1="88.4" x2="690" y2="88.4" stroke="#57606a" stroke-width="1.2" stroke-dasharray="4 3"/>
 <line x1="44" y1="90" x2="690" y2="90" stroke="#57606a" stroke-width="1.2"/>
-<text x="50" y="248" font-family="system-ui,sans-serif" font-size="11.5" font-weight="600" fill="#085041">median −9.9%  ·  10 of 10 pairs faster</text>
+<text x="50" y="248" font-family="system-ui,sans-serif" font-size="11.5" font-weight="600" fill="#085041">median −10.3%  ·  8 of 8 pairs faster</text>
 <text x="50" y="266" font-family="system-ui,sans-serif" font-size="11" fill="#57606a">one direction, every time</text>
-<text x="386" y="248" font-family="system-ui,sans-serif" font-size="11.5" font-weight="600" fill="#57606a">median −0.6%  ·  6 faster, 3 slower, 1 flat</text>
+<text x="386" y="248" font-family="system-ui,sans-serif" font-size="11.5" font-weight="600" fill="#57606a">median +0.2%  ·  3 faster, 4 slower, 1 flat</text>
 <text x="386" y="266" font-family="system-ui,sans-serif" font-size="11" fill="#57606a">no consistent direction — as intended</text>
 <text x="50" y="284" font-family="system-ui,sans-serif" font-size="10" fill="#8c959f">dashed line = median</text>
 </svg>
@@ -230,10 +269,10 @@ Ten alternating paired runs (baseline, fixed, baseline, fixed — so interferenc
 
 | buffer | median | spread |
 | --- | --- | --- |
-| misaligned | **−9.9%** | 10 of 10 pairs favor the change, −6.8% to −13.9% |
-| aligned | −0.6% | signs mixed — no regression |
+| misaligned | **−10.3%** | 8 of 8 pairs favor the change, −8.2% to −12.6% |
+| aligned | +0.2% | signs mixed — no regression |
 
-I nearly got this wrong. My first number was −12%, measured sequentially — and partway through, a macOS sync daemon started burning 150% CPU and inflated absolute times sixfold. Sequential A/B on a machine you don't control is measuring the machine.
+I nearly got this wrong too. My first number was −12%, measured sequentially — and partway through, a macOS sync daemon started burning 150% CPU and inflated absolute times sixfold. Sequential A/B on a machine you don't control is measuring the machine.
 
 The number I actually trust isn't a timing. The benchmark counts writes that had to copy, and that counter is deterministic:
 
@@ -241,45 +280,14 @@ The number I actually trust isn't a timing. The benchmark counts writes that had
 
 *Caveat: measured on macOS. This trades a memcpy for at most one extra syscall, and that exchange rate differs in production.*
 
-## Found, not fixed
-
-```cpp
-auto result = bio_io_handle(b)->writev(&slice, 1);
-```
-
-One iovec, one syscall, per TLS record. The plaintext path hands the *entire* buffer to a single multi-iovec `writev`.
-
-<figure>
-<svg width="100%" viewBox="0 0 720 210" role="img" xmlns="http://www.w3.org/2000/svg" style="max-width:720px">
-<title>Syscalls per 1 MB response, plaintext versus TLS</title>
-<desc>Sending a 1 MB response over the plaintext path costs a single writev syscall. The same response over TLS costs sixty-four, one per 16 KB record.</desc>
-<rect x="1" y="1" width="718" height="208" rx="10" fill="#ffffff" stroke="#d0d7de"/>
-<text x="24" y="30" font-family="system-ui,sans-serif" font-size="12.5" font-weight="600" fill="#1f2328">writev syscalls to send one 1 MB response</text>
-<text x="24" y="66" font-family="system-ui,sans-serif" font-size="11.5" font-weight="600" fill="#085041">plaintext</text>
-<rect x="120" y="52" width="170" height="20" rx="3" fill="#E1F5EE" stroke="#0F6E56"/>
-<text x="205" y="66" font-family="system-ui,sans-serif" font-size="10.5" fill="#085041" text-anchor="middle">one multi-iovec writev</text>
-<text x="304" y="66" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#085041">1</text>
-<text x="24" y="112" font-family="system-ui,sans-serif" font-size="11.5" font-weight="600" fill="#8C1D1D">TLS</text>
-<g fill="#B22B2B">
-<rect x="120" y="92" width="8" height="8" rx="1"/><rect x="131" y="92" width="8" height="8" rx="1"/><rect x="142" y="92" width="8" height="8" rx="1"/><rect x="153" y="92" width="8" height="8" rx="1"/><rect x="164" y="92" width="8" height="8" rx="1"/><rect x="175" y="92" width="8" height="8" rx="1"/><rect x="186" y="92" width="8" height="8" rx="1"/><rect x="197" y="92" width="8" height="8" rx="1"/><rect x="208" y="92" width="8" height="8" rx="1"/><rect x="219" y="92" width="8" height="8" rx="1"/><rect x="230" y="92" width="8" height="8" rx="1"/><rect x="241" y="92" width="8" height="8" rx="1"/><rect x="252" y="92" width="8" height="8" rx="1"/><rect x="263" y="92" width="8" height="8" rx="1"/><rect x="274" y="92" width="8" height="8" rx="1"/><rect x="285" y="92" width="8" height="8" rx="1"/>
-<rect x="120" y="103" width="8" height="8" rx="1"/><rect x="131" y="103" width="8" height="8" rx="1"/><rect x="142" y="103" width="8" height="8" rx="1"/><rect x="153" y="103" width="8" height="8" rx="1"/><rect x="164" y="103" width="8" height="8" rx="1"/><rect x="175" y="103" width="8" height="8" rx="1"/><rect x="186" y="103" width="8" height="8" rx="1"/><rect x="197" y="103" width="8" height="8" rx="1"/><rect x="208" y="103" width="8" height="8" rx="1"/><rect x="219" y="103" width="8" height="8" rx="1"/><rect x="230" y="103" width="8" height="8" rx="1"/><rect x="241" y="103" width="8" height="8" rx="1"/><rect x="252" y="103" width="8" height="8" rx="1"/><rect x="263" y="103" width="8" height="8" rx="1"/><rect x="274" y="103" width="8" height="8" rx="1"/><rect x="285" y="103" width="8" height="8" rx="1"/>
-<rect x="120" y="114" width="8" height="8" rx="1"/><rect x="131" y="114" width="8" height="8" rx="1"/><rect x="142" y="114" width="8" height="8" rx="1"/><rect x="153" y="114" width="8" height="8" rx="1"/><rect x="164" y="114" width="8" height="8" rx="1"/><rect x="175" y="114" width="8" height="8" rx="1"/><rect x="186" y="114" width="8" height="8" rx="1"/><rect x="197" y="114" width="8" height="8" rx="1"/><rect x="208" y="114" width="8" height="8" rx="1"/><rect x="219" y="114" width="8" height="8" rx="1"/><rect x="230" y="114" width="8" height="8" rx="1"/><rect x="241" y="114" width="8" height="8" rx="1"/><rect x="252" y="114" width="8" height="8" rx="1"/><rect x="263" y="114" width="8" height="8" rx="1"/><rect x="274" y="114" width="8" height="8" rx="1"/><rect x="285" y="114" width="8" height="8" rx="1"/>
-<rect x="120" y="125" width="8" height="8" rx="1"/><rect x="131" y="125" width="8" height="8" rx="1"/><rect x="142" y="125" width="8" height="8" rx="1"/><rect x="153" y="125" width="8" height="8" rx="1"/><rect x="164" y="125" width="8" height="8" rx="1"/><rect x="175" y="125" width="8" height="8" rx="1"/><rect x="186" y="125" width="8" height="8" rx="1"/><rect x="197" y="125" width="8" height="8" rx="1"/><rect x="208" y="125" width="8" height="8" rx="1"/><rect x="219" y="125" width="8" height="8" rx="1"/><rect x="230" y="125" width="8" height="8" rx="1"/><rect x="241" y="125" width="8" height="8" rx="1"/><rect x="252" y="125" width="8" height="8" rx="1"/><rect x="263" y="125" width="8" height="8" rx="1"/><rect x="274" y="125" width="8" height="8" rx="1"/><rect x="285" y="125" width="8" height="8" rx="1"/>
-</g>
-<text x="304" y="116" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#8C1D1D">64</text>
-<text x="330" y="116" font-family="system-ui,sans-serif" font-size="10.5" fill="#8C1D1D">one per 16 KB record</text>
-<text x="24" y="172" font-family="system-ui,sans-serif" font-size="11.5" fill="#57606a">Same bytes, same buffer. The TLS path just never batches them.</text>
-<text x="24" y="192" font-family="system-ui,sans-serif" font-size="11" fill="#57606a">Untouched — a buffering BIO trades 63 syscalls for 64 ciphertext copies, which needs a design discussion.</text>
-</svg>
-<figcaption>Found while chasing the record-size question, and larger than what I set out to fix.</figcaption>
-</figure>
-
-A buffering BIO would trade N−1 syscalls for N ciphertext copies — likely worth it on Linux — but it tangles with partial writes and the `WANT_WRITE` contract enough to deserve a design discussion, not a patch.
-
 ## The takeaway
 
-My first fix failed for a reason visible before I wrote it. I'd framed the bug as *"the front slice is sometimes too small"* when it was *"the buffer is a fixed point under the operation meant to fix it."*
+Both wrong turns came from describing the bug loosely and then solving the description.
 
-The first framing suggests a threshold. The second tells you a threshold cannot work, and that you need history rather than state.
+The threshold failed because I'd framed the bug as *"the front slice is sometimes too small"* when it was *"the buffer is a fixed point under the operation meant to fix it."* The first framing suggests a threshold; the second tells you a threshold cannot work.
 
-I wrote the threshold version anyway — and the benchmark told me in ten seconds, because it had a counter in it and not just a stopwatch.
+The escape failed for the mirror-image reason. I'd fixed the framing but kept solving for *"has this copied before?"* when the question the code actually needs to answer is *"will writing the front slice make the next write contiguous?"* — which is not a fact about history at all. It's a fact about the buffer, one slice ahead, cheap to just look at.
+
+History was the right answer to the wrong question. It works on the shape I had in mind and quietly doubles the syscall count on the shapes I didn't.
+
+What saved both of them was the same thing: a benchmark and a test suite that count operations, not just time. A stopwatch says "about the same." A copy counter and a record counter say 17 → 32, and there's no arguing with that.
