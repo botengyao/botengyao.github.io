@@ -82,7 +82,7 @@ Call a buffer in this shape — a short slice of H bytes sitting ahead of full-s
 <text x="360" y="286" font-family="system-ui,sans-serif" font-size="11.5" fill="#57606a" text-anchor="middle">Same shape, same H, for any H. The state after the write is the state before it.</text>
 <text x="360" y="308" font-family="system-ui,sans-serif" font-size="11.5" font-weight="600" fill="#8C1D1D" text-anchor="middle">One 16 KB malloc + one 16 KB memcpy + one free, per 16 KB, for the life of the connection.</text>
 </svg>
-<figcaption>The buffer is self-similar across the operation meant to fix it. That's the whole bug.</figcaption>
+<figcaption><code>linearize()</code> reproduces the exact shape it was called to remove, so the next write faces the same buffer as the last one.</figcaption>
 </figure>
 
 ## The fix
@@ -184,11 +184,15 @@ Without it, chains that are fragmented more than one slice deep — HTTP/1 chunk
 
 Nearly double the records and `writev` syscalls, for identical bytes copied. The check also means a write that drains the whole buffer is never split in two, since it can only pass when data remains behind the front slice.
 
-## Retries
+## When a write doesn't go through
 
-`SSL_write()` can return `SSL_ERROR_WANT_WRITE`, and the write is retried later. The retry repeats the pending write verbatim — same pointer, same length, and the same record of whether it came from a copy — rather than deciding again. Deciding again would look at the buffer *after* the linearize, conclude nothing was copied, and lose the history the next decision depends on. On a connection that accepts less than one full record per readiness event, that happens on every write and the optimization never engages.
+If the socket is full, `SSL_write()` writes nothing and returns `SSL_ERROR_WANT_WRITE`. Envoy sends the same write again when the socket is ready.
 
-BoringSSL requires the same pointer on a retry regardless, since Envoy does not set `SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER`. The pending write is discharged before `write_buffer.drain()`, because `drain()` runs low-watermark callbacks and slice drain trackers that can re-enter `doWrite()`.
+A retry must not re-run the decision above. By then the buffer has already been linearized, so the code would see a contiguous front slice, conclude that no copy was needed, and clear `linearized_last_write`. When the retry lands and drains, the short remainder is back at the front with no history behind it — and it copies again. On a congested connection that repeats on every write, and the change never takes effect at all.
+
+So the pending write is stored and replayed unchanged: same pointer, same length, and the same record of whether it came from a copy. BoringSSL requires the identical pointer in any case, since Envoy does not set `SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER`.
+
+One ordering detail: that pending write is cleared *before* `write_buffer.drain()`, not after. `drain()` can run callbacks that re-enter `doWrite()`, and a nested call must not find a write still pending that has already been sent.
 
 ## Results
 
