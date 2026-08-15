@@ -32,55 +32,53 @@ Two numbers matter, and they are the same number: the most Envoy hands to one `S
 
 The short slice at the front is the response headers. `ConnectionImpl::write()` moves the codec's output into the connection buffer wholesale, so a few hundred bytes of headers land as their own slice ahead of the body's full-size ones. Call that size **H**.
 
-`linearize(16384)` on `[H][16384][16384]…` does this:
-
-```text
-copy    16384 bytes = all H of slice 1, plus (16384 − H) of slice 2
-drain   16384 bytes = pops slice 1, takes (16384 − H) off slice 2
-                    → slice 2 keeps 16384 − (16384 − H) = H bytes
-push    the fresh 16 KB slice at the front
-
-        [16 KB new][H][16384]…   →  write + drain removes the new slice
-                   [H][16384]…   ←  exactly where it started
-```
+Here is what `linearize(16384)` does to that buffer:
 
 **The leftover is always exactly H**, for any H. The copy takes H bytes off the front and leaves H bytes behind on the next slice, so the offset is conserved rather than worn down. The short slice in the "after" state is a *different* H bytes — the tail of slice 2, not the original headers.
 
 Call a buffer in this shape — a short slice of H bytes sitting ahead of full-size ones — a **misaligned chain**. The point is that `linearize()` does not clear it. It reproduces it, so every write from then on allocates and copies 16 KB.
 
 <figure>
-<svg width="100%" viewBox="0 0 720 330" role="img" xmlns="http://www.w3.org/2000/svg" style="max-width:720px">
+<svg width="100%" viewBox="0 0 720 320" role="img" xmlns="http://www.w3.org/2000/svg" style="max-width:720px">
 <title>Why the write buffer never re-aligns</title>
-<desc>Before the write, the buffer is a short header slice followed by full 16 KB slices. After linearize copies, writes and drains, the buffer is again a short slice followed by full 16 KB slices — the same shape, so the next write copies again.</desc>
-<rect x="1" y="1" width="718" height="328" rx="10" fill="#ffffff" stroke="#d0d7de"/>
-<text x="24" y="34" font-family="system-ui,sans-serif" font-size="13" font-weight="600" fill="#8C1D1D">Before the write</text>
-<rect x="24" y="48" width="58" height="34" rx="5" fill="#FDF0EF" stroke="#B22B2B"/>
-<text x="53" y="70" font-family="system-ui,sans-serif" font-size="11" fill="#8C1D1D" text-anchor="middle">200 B</text>
-<rect x="86" y="48" width="185" height="34" rx="5" fill="#f6f8fa" stroke="#57606a"/>
-<text x="178" y="70" font-family="system-ui,sans-serif" font-size="11.5" fill="#1f2328" text-anchor="middle">16 KB</text>
-<rect x="275" y="48" width="185" height="34" rx="5" fill="#f6f8fa" stroke="#57606a"/>
-<text x="367" y="70" font-family="system-ui,sans-serif" font-size="11.5" fill="#1f2328" text-anchor="middle">16 KB</text>
-<text x="474" y="70" font-family="system-ui,sans-serif" font-size="12" fill="#57606a">…</text>
-<text x="500" y="66" font-family="system-ui,sans-serif" font-size="11" fill="#8C1D1D">headers — call this H</text>
-<line x1="24" y1="104" x2="696" y2="104" stroke="#eaeef2"/>
-<text x="24" y="122" font-family="system-ui,sans-serif" font-size="11.5" fill="#57606a">linearize(16 KB) drains all H of slice 1, then (16 KB − H) off slice 2 …</text>
-<text x="24" y="137" font-family="system-ui,sans-serif" font-size="11.5" font-weight="600" fill="#8C1D1D">… so slice 2 is left holding 16 KB − (16 KB − H) = H bytes. The offset is conserved.</text>
-<line x1="24" y1="146" x2="696" y2="146" stroke="#eaeef2"/>
-<text x="24" y="176" font-family="system-ui,sans-serif" font-size="13" font-weight="600" fill="#8C1D1D">After the write</text>
-<rect x="24" y="190" width="58" height="34" rx="5" fill="#FDF0EF" stroke="#B22B2B"/>
-<text x="53" y="212" font-family="system-ui,sans-serif" font-size="11" fill="#8C1D1D" text-anchor="middle">200 B</text>
-<rect x="86" y="190" width="185" height="34" rx="5" fill="#f6f8fa" stroke="#57606a"/>
-<text x="178" y="212" font-family="system-ui,sans-serif" font-size="11.5" fill="#1f2328" text-anchor="middle">16 KB</text>
-<rect x="275" y="190" width="185" height="34" rx="5" fill="#f6f8fa" stroke="#57606a"/>
-<text x="367" y="212" font-family="system-ui,sans-serif" font-size="11.5" fill="#1f2328" text-anchor="middle">16 KB</text>
-<text x="474" y="212" font-family="system-ui,sans-serif" font-size="12" fill="#57606a">…</text>
-<text x="500" y="204" font-family="system-ui,sans-serif" font-size="11" fill="#8C1D1D">also H — but this is the</text>
-<text x="500" y="217" font-family="system-ui,sans-serif" font-size="11" fill="#8C1D1D">tail of slice 2, not the headers</text>
-<path d="M660 224 C 690 224 690 48 660 48" fill="none" stroke="#B22B2B" stroke-width="1.6"/>
-<path d="M666 54 L 658 47 L 666 41" fill="none" stroke="#B22B2B" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-<text x="612" y="140" font-family="system-ui,sans-serif" font-size="11" font-weight="600" fill="#B22B2B" text-anchor="middle">identical shape</text>
-<text x="360" y="286" font-family="system-ui,sans-serif" font-size="11.5" fill="#57606a" text-anchor="middle">Same shape, same H, for any H. The state after the write is the state before it.</text>
-<text x="360" y="308" font-family="system-ui,sans-serif" font-size="11.5" font-weight="600" fill="#8C1D1D" text-anchor="middle">One 16 KB malloc + one 16 KB memcpy + one free, per 16 KB, for the life of the connection.</text>
+<desc>Step one: the buffer is a short header slice of H bytes ahead of full 16 KB slices. Step two: linearize copies H plus 16384 minus H into a fresh 16 KB slice and drains that much, which leaves the second slice holding exactly H bytes. Step three: writing and draining the fresh slice returns the buffer to the shape it had in step one, so the next write copies again.</desc>
+<rect x="1" y="1" width="718" height="318" rx="10" fill="#ffffff" stroke="#d0d7de"/>
+<text x="24" y="30" font-family="system-ui,sans-serif" font-size="11" font-weight="600" fill="#8C1D1D">1 — the write buffer: headers ahead of full-size body slices</text>
+<rect x="24" y="40" width="58" height="30" rx="4" fill="#FDF0EF" stroke="#B22B2B"/>
+<text x="53" y="60" font-family="system-ui,sans-serif" font-size="11" fill="#8C1D1D" text-anchor="middle">H</text>
+<rect x="86" y="40" width="170" height="30" rx="4" fill="#f6f8fa" stroke="#57606a"/>
+<text x="171" y="60" font-family="system-ui,sans-serif" font-size="11" fill="#1f2328" text-anchor="middle">16384</text>
+<rect x="260" y="40" width="170" height="30" rx="4" fill="#f6f8fa" stroke="#57606a"/>
+<text x="345" y="60" font-family="system-ui,sans-serif" font-size="11" fill="#1f2328" text-anchor="middle">16384</text>
+<text x="440" y="60" font-family="system-ui,sans-serif" font-size="12" fill="#57606a">…</text>
+<text x="464" y="56" font-family="system-ui,sans-serif" font-size="10.5" fill="#8C1D1D">H = the response headers,</text>
+<text x="464" y="68" font-family="system-ui,sans-serif" font-size="10.5" fill="#8C1D1D">a few hundred bytes</text>
+<line x1="24" y1="88" x2="696" y2="88" stroke="#eaeef2"/>
+<text x="24" y="110" font-family="system-ui,sans-serif" font-size="11" font-weight="600" fill="#8C1D1D">2 — linearize(16384) copies H + (16384 − H) into a fresh slice, and drains that much</text>
+<rect x="24" y="120" width="170" height="30" rx="4" fill="#FDF0EF" stroke="#B22B2B" stroke-dasharray="4 2"/>
+<text x="109" y="140" font-family="system-ui,sans-serif" font-size="11" fill="#8C1D1D" text-anchor="middle">16384 — fresh copy</text>
+<rect x="198" y="120" width="58" height="30" rx="4" fill="#FDF0EF" stroke="#B22B2B"/>
+<text x="227" y="140" font-family="system-ui,sans-serif" font-size="11" fill="#8C1D1D" text-anchor="middle">H</text>
+<rect x="260" y="120" width="170" height="30" rx="4" fill="#f6f8fa" stroke="#57606a"/>
+<text x="345" y="140" font-family="system-ui,sans-serif" font-size="11" fill="#1f2328" text-anchor="middle">16384</text>
+<text x="440" y="140" font-family="system-ui,sans-serif" font-size="12" fill="#57606a">…</text>
+<path d="M227 156 L 227 168" fill="none" stroke="#B22B2B" stroke-width="1.2"/>
+<text x="24" y="182" font-family="system-ui,sans-serif" font-size="10.5" font-weight="600" fill="#8C1D1D">slice 2 gave up (16384 − H) and keeps 16384 − (16384 − H) = H bytes</text>
+<line x1="24" y1="196" x2="696" y2="196" stroke="#eaeef2"/>
+<text x="24" y="218" font-family="system-ui,sans-serif" font-size="11" font-weight="600" fill="#8C1D1D">3 — the 16384 record is written and drained, so the fresh slice is gone</text>
+<rect x="24" y="228" width="58" height="30" rx="4" fill="#FDF0EF" stroke="#B22B2B"/>
+<text x="53" y="248" font-family="system-ui,sans-serif" font-size="11" fill="#8C1D1D" text-anchor="middle">H</text>
+<rect x="86" y="228" width="170" height="30" rx="4" fill="#f6f8fa" stroke="#57606a"/>
+<text x="171" y="248" font-family="system-ui,sans-serif" font-size="11" fill="#1f2328" text-anchor="middle">16384</text>
+<rect x="260" y="228" width="170" height="30" rx="4" fill="#f6f8fa" stroke="#57606a"/>
+<text x="345" y="248" font-family="system-ui,sans-serif" font-size="11" fill="#1f2328" text-anchor="middle">16384</text>
+<text x="440" y="248" font-family="system-ui,sans-serif" font-size="12" fill="#57606a">…</text>
+<text x="464" y="244" font-family="system-ui,sans-serif" font-size="10.5" font-weight="600" fill="#8C1D1D">identical to step 1 — but this H</text>
+<text x="464" y="256" font-family="system-ui,sans-serif" font-size="10.5" font-weight="600" fill="#8C1D1D">is the tail of slice 2</text>
+<path d="M668 243 C 702 243 702 55 668 55" fill="none" stroke="#B22B2B" stroke-width="1.6"/>
+<path d="M674 61 L 666 54 L 674 48" fill="none" stroke="#B22B2B" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="640" y="152" font-family="system-ui,sans-serif" font-size="10.5" font-weight="600" fill="#B22B2B" text-anchor="end">repeats</text>
+<text x="360" y="298" font-family="system-ui,sans-serif" font-size="11.5" font-weight="600" fill="#8C1D1D" text-anchor="middle">One 16 KB malloc + one 16 KB memcpy + one free, per 16 KB, for the life of the connection.</text>
 </svg>
 <figcaption><code>linearize()</code> reproduces the exact shape it was called to remove, so the next write faces the same buffer as the last one.</figcaption>
 </figure>
@@ -192,22 +190,56 @@ Without that check, a chain of equal sub-16 KB slices goes wrong — the slice b
 
 How badly depends on what 16384 leaves over. A linearize consumes whole slices until it needs part of one more, and that slice keeps `slice_size − (16384 mod slice_size)` bytes. Pick a size just above an exact divisor of 16 KB and that remainder is almost nothing: 4097 is one byte over 16384/4, so it strands **4 bytes**; 5462 is just over 16384/3 and strands **2**. Those few bytes are all the short record has to write.
 
-Taking 4097 as the worst case:
+These are slice sizes fed to a unit test, not constants in Envoy — a slice holds whatever its producer wrote, so any size occurs. Taking 4097 as the worst case:
 
-```text
-[4097][4097][4097][4097]…
+<figure>
+<svg width="100%" viewBox="0 0 720 322" role="img" xmlns="http://www.w3.org/2000/svg" style="max-width:720px">
+<title>Why a short record achieves nothing on a chain of equal 4097-byte slices</title>
+<desc>A linearize of 16 KB consumes three whole 4097-byte slices plus 4093 bytes of the fourth, leaving that slice holding 4 bytes. The short record then writes only those 4 bytes, but the slice behind it is still 4097 bytes and cannot satisfy the next 16 KB write, so the next write copies again.</desc>
+<rect x="1" y="1" width="718" height="320" rx="10" fill="#ffffff" stroke="#d0d7de"/>
+<text x="24" y="30" font-family="system-ui,sans-serif" font-size="11" font-weight="600" fill="#8C1D1D">1 — linearize(16 KB) takes 3 whole slices plus 4093 B of the 4th</text>
+<rect x="24" y="40" width="96" height="30" rx="4" fill="#FDF0EF" stroke="#B22B2B"/>
+<text x="72" y="60" font-family="system-ui,sans-serif" font-size="11" fill="#8C1D1D" text-anchor="middle">4097</text>
+<rect x="123" y="40" width="96" height="30" rx="4" fill="#FDF0EF" stroke="#B22B2B"/>
+<text x="171" y="60" font-family="system-ui,sans-serif" font-size="11" fill="#8C1D1D" text-anchor="middle">4097</text>
+<rect x="222" y="40" width="96" height="30" rx="4" fill="#FDF0EF" stroke="#B22B2B"/>
+<text x="270" y="60" font-family="system-ui,sans-serif" font-size="11" fill="#8C1D1D" text-anchor="middle">4097</text>
+<rect x="321" y="40" width="89" height="30" fill="#FDF0EF" stroke="#B22B2B"/>
+<text x="365" y="60" font-family="system-ui,sans-serif" font-size="10.5" fill="#8C1D1D" text-anchor="middle">4093 of it</text>
+<rect x="410" y="40" width="9" height="30" fill="#ffffff" stroke="#B22B2B" stroke-width="1.5"/>
+<rect x="422" y="40" width="96" height="30" rx="4" fill="#f6f8fa" stroke="#57606a"/>
+<text x="470" y="60" font-family="system-ui,sans-serif" font-size="11" fill="#1f2328" text-anchor="middle">4097</text>
+<text x="528" y="60" font-family="system-ui,sans-serif" font-size="12" fill="#57606a">…</text>
+<path d="M414 76 L 414 92" fill="none" stroke="#B22B2B" stroke-width="1.2"/>
+<text x="420" y="96" font-family="system-ui,sans-serif" font-size="10.5" font-weight="600" fill="#8C1D1D">4 B left over (not to scale)</text>
+<line x1="24" y1="110" x2="696" y2="110" stroke="#eaeef2"/>
+<text x="24" y="132" font-family="system-ui,sans-serif" font-size="11" font-weight="600" fill="#8C1D1D">2 — the short record writes those 4 bytes, and aligns nothing</text>
+<rect x="24" y="142" width="9" height="30" fill="#FDF0EF" stroke="#B22B2B" stroke-width="1.5"/>
+<rect x="38" y="142" width="96" height="30" rx="4" fill="#f6f8fa" stroke="#57606a"/>
+<text x="86" y="162" font-family="system-ui,sans-serif" font-size="11" fill="#1f2328" text-anchor="middle">4097</text>
+<rect x="137" y="142" width="96" height="30" rx="4" fill="#f6f8fa" stroke="#57606a"/>
+<text x="185" y="162" font-family="system-ui,sans-serif" font-size="11" fill="#1f2328" text-anchor="middle">4097</text>
+<rect x="236" y="142" width="96" height="30" rx="4" fill="#f6f8fa" stroke="#57606a"/>
+<text x="284" y="162" font-family="system-ui,sans-serif" font-size="11" fill="#1f2328" text-anchor="middle">4097</text>
+<text x="342" y="162" font-family="system-ui,sans-serif" font-size="12" fill="#57606a">…</text>
+<path d="M28 178 L 28 192" fill="none" stroke="#B22B2B" stroke-width="1.2"/>
+<text x="34" y="196" font-family="system-ui,sans-serif" font-size="10.5" font-weight="600" fill="#8C1D1D">a 4-byte TLS record — one syscall, ~24 B on the wire</text>
+<text x="366" y="162" font-family="system-ui,sans-serif" font-size="10.5" fill="#8C1D1D">the slice behind it is 4097 — still short of 16 KB</text>
+<line x1="24" y1="226" x2="696" y2="226" stroke="#eaeef2"/>
+<text x="24" y="248" font-family="system-ui,sans-serif" font-size="11" font-weight="600" fill="#8C1D1D">3 — so the next write copies again, and the cycle repeats from step 1</text>
+<rect x="24" y="258" width="96" height="30" rx="4" fill="#FDF0EF" stroke="#B22B2B"/>
+<text x="72" y="278" font-family="system-ui,sans-serif" font-size="11" fill="#8C1D1D" text-anchor="middle">4097</text>
+<rect x="123" y="258" width="96" height="30" rx="4" fill="#FDF0EF" stroke="#B22B2B"/>
+<text x="171" y="278" font-family="system-ui,sans-serif" font-size="11" fill="#8C1D1D" text-anchor="middle">4097</text>
+<rect x="222" y="258" width="96" height="30" rx="4" fill="#FDF0EF" stroke="#B22B2B"/>
+<text x="270" y="278" font-family="system-ui,sans-serif" font-size="11" fill="#8C1D1D" text-anchor="middle">4097</text>
+<text x="330" y="278" font-family="system-ui,sans-serif" font-size="12" fill="#57606a">…</text>
+<text x="400" y="302" font-family="system-ui,sans-serif" font-size="11.5" font-weight="600" fill="#8C1D1D" text-anchor="middle">Bytes copied: unchanged. Records and syscalls: doubled.</text>
+</svg>
+<figcaption>The short record only helps if the slice behind the front one can cover the next write. Here it never can, so each copy is followed by a near-empty record that aligns nothing.</figcaption>
+</figure>
 
-linearize(16 KB)   takes 3 whole slices (12291 B) plus 4093 B of the 4th
-                   → the 4th is left holding 4097 − 4093 = 4 B
-write 16 KB, drain
-
-[4][4097][4097]…   the short record fires and writes 4 bytes —
-                   but the slice behind it is 4097, not 16 KB
-
-[4097][4097]…      so the next write copies again, and so on
-```
-
-Every copy is now followed by a near-empty record that aligned nothing. Measured over 64 slices:
+Measured in that test, 64 slices of each size:
 
 | slice size | TLS records, without the check |
 | --- | --- |
