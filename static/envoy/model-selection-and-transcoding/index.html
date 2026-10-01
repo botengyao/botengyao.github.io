@@ -1,0 +1,804 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="description" content="Preview of the Envoy sandbox page merged in envoyproxy/examples#1470: one OpenAI endpoint, routed by model to OpenAI, Anthropic and Vertex AI.">
+<title>Model selection and transcoding</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato:ital,wght@0,400;0,700;1,400&family=Roboto+Slab:wght@600;700&display=swap">
+<style>
+/* Layout: one reading column, set like the Envoy docs, under a banner that says what this preview is. */
+:root {
+  --bg: #fcfcfc; --fg: #404040; --heading: #22252b; --muted: #687280; --rule: #e1e4e5; --link: #2472b3;
+  --banner-bg: #eef2ff; --banner-fg: #312e81; --banner-rule: #c7d2fe;
+  --inline-code: #c0392b; --inline-code-bg: #ffffff;
+  --panel-bg: #f4f6f8; --panel-rule: #dfe3e8;
+  --note-bg: #e7f2fa; --note-bar: #3a87c4; --tip-bg: #dbf6ef; --tip-bar: #17a589;
+  --warn-bg: #ffedcc; --warn-bar: #d9822b; --see-bg: #eef0f3; --see-bar: #6b7480; --admon-fg: #2f3237;
+  --on-bar: #ffffff;
+  --code-bg: #f8f8f8; --code-fg: #1f2328; --code-rule: #e1e4e5; --lineno: #9aa1ab;
+  --btn-bg: #ffffff; --btn-fg: #374151; --btn-rule: #d1d5db;
+  --font-body: "Lato", "Helvetica Neue", Arial, sans-serif;
+  --font-head: "Roboto Slab", Georgia, "Times New Roman", serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15171c; --fg: #cfd4dc; --heading: #f1f3f6; --muted: #98a1ae; --rule: #2b3038; --link: #6cb4f5;
+    --banner-bg: #1e1b4b; --banner-fg: #c7d2fe; --banner-rule: #3730a3;
+    --inline-code: #ff9b8a; --inline-code-bg: #1d2026;
+    --panel-bg: #1b1e24; --panel-rule: #2b3038;
+    --note-bg: #13283a; --tip-bg: #0f2e29; --warn-bg: #36270f; --see-bg: #1d2026; --admon-fg: #d6dbe2;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+    --bg: #15171c; --fg: #cfd4dc; --heading: #f1f3f6; --muted: #98a1ae; --rule: #2b3038; --link: #6cb4f5;
+    --banner-bg: #1e1b4b; --banner-fg: #c7d2fe; --banner-rule: #3730a3;
+    --inline-code: #ff9b8a; --inline-code-bg: #1d2026;
+    --panel-bg: #1b1e24; --panel-rule: #2b3038;
+    --note-bg: #13283a; --tip-bg: #0f2e29; --warn-bg: #36270f; --see-bg: #1d2026; --admon-fg: #d6dbe2;
+    color-scheme: dark;
+}
+body { background: var(--bg); color: var(--fg); font: 16px/1.65 var(--font-body); }
+.page { max-width: 54rem; margin: 0 auto; padding-inline: 16px; padding-block: 0 3rem; }
+.preview { display: flex; flex-wrap: wrap; gap: .35rem 1rem; align-items: baseline; margin-block: 1rem 2rem;
+  padding: .8rem 1rem; background: var(--banner-bg); color: var(--banner-fg); border: 1px solid var(--banner-rule);
+  border-radius: 6px; font-size: .9rem; }
+.preview strong { font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; }
+.preview span { flex: 1 1 22rem; min-width: 0; }
+.preview a { color: inherit; font-weight: 700; }
+a { color: var(--link); }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+h1, h2, h3 { font-family: var(--font-head); color: var(--heading); line-height: 1.25; text-wrap: balance; }
+h1 { font-size: 2.1rem; margin: 0 0 1.2rem; }
+h2 { font-size: 1.5rem; margin: 2.4rem 0 .9rem; padding-top: .4rem; border-top: 1px solid var(--rule); }
+h3 { font-size: 1.2rem; margin: 1.8rem 0 .7rem; }
+p, ul, ol, dl { margin: 0 0 1rem; }
+li { margin-bottom: .35rem; }
+section { min-width: 0; }
+a.headerlink { visibility: hidden; margin-left: .35em; color: var(--muted); text-decoration: none; font-size: .8em; }
+h1:hover a.headerlink, h2:hover a.headerlink, h3:hover a.headerlink, a.headerlink:focus { visibility: visible; }
+code.literal { font: .86em/1.4 var(--font-mono); color: var(--inline-code); background: var(--inline-code-bg);
+  border: 1px solid var(--rule); border-radius: 3px; padding: 1px 4px; overflow-wrap: anywhere; }
+.sidebar { float: right; width: 38%; margin: 0 0 1rem 1.5rem; padding: .9rem 1.1rem; background: var(--panel-bg);
+  border: 1px solid var(--panel-rule); border-radius: 6px; font-size: .92rem; }
+.sidebar .sidebar-title { font-weight: 700; color: var(--heading); margin-bottom: .6rem; }
+.sidebar dl { margin: 0; }
+.sidebar dt { font-weight: 700; margin-top: .6rem; }
+.sidebar dd { margin: .15rem 0 0 1rem; }
+.sidebar dd p { margin: 0; }
+@media (max-width: 760px) { .sidebar { float: none; width: auto; margin: 0 0 1.2rem; } }
+figure.diagram { clear: both; margin: 1.5rem 0; overflow-x: auto; }
+figure.diagram svg { display: block; max-width: 100%; height: auto; }
+.admonition { margin: 1.2rem 0; padding: 0 1rem .2rem; border-radius: 4px; color: var(--admon-fg); }
+.admonition .admonition-title { margin: 0 -1rem .7rem; padding: .35rem 1rem; font-weight: 700; color: var(--on-bar);
+  border-radius: 4px 4px 0 0; }
+.admonition.note { background: var(--note-bg); }
+.admonition.note .admonition-title { background: var(--note-bar); }
+.admonition.tip { background: var(--tip-bg); }
+.admonition.tip .admonition-title { background: var(--tip-bar); }
+.admonition.warning { background: var(--warn-bg); }
+.admonition.warning .admonition-title { background: var(--warn-bar); }
+.admonition.seealso { background: var(--see-bg); }
+.admonition.seealso .admonition-title { background: var(--see-bar); }
+.admonition dt { font-weight: 700; }
+.admonition dd { margin: 0 0 .7rem 1rem; }
+.table-wrap { overflow-x: auto; margin: 0 0 1.2rem; }
+table.docutils { border-collapse: collapse; font-size: .9rem; min-width: 36rem; }
+table.docutils th, table.docutils td { border: 1px solid var(--rule); padding: .45rem .6rem; text-align: left; vertical-align: top; }
+table.docutils th { background: var(--panel-bg); color: var(--heading); }
+table.docutils td p, table.docutils th p { margin: 0; }
+div[class^="highlight-"] { margin: 0 0 1.2rem; }
+.copy { position: absolute; top: .4rem; right: .4rem; padding: .15rem .55rem; font: 12px var(--font-body);
+  color: var(--btn-fg); background: var(--btn-bg); border: 1px solid var(--btn-rule); border-radius: 4px;
+  cursor: pointer; opacity: .55; }
+.highlight:hover .copy, .copy:focus-visible { opacity: 1; }
+.source { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--rule); color: var(--muted); font-size: .85rem; }
+@media (prefers-reduced-motion: no-preference) { .copy { transition: opacity .15s; } }
+/* Code blocks stay light in both themes, so the highlighting below reads on them. */
+pre { line-height: 125%; }
+td.linenos .normal { color: inherit; background-color: transparent; padding-left: 5px; padding-right: 5px; }
+span.linenos { color: inherit; background-color: transparent; padding-left: 5px; padding-right: 5px; }
+td.linenos .special { color: #000000; background-color: #ffffc0; padding-left: 5px; padding-right: 5px; }
+span.linenos.special { color: #000000; background-color: #ffffc0; padding-left: 5px; padding-right: 5px; }
+.highlight .hll { background-color: #ffffcc }
+.highlight { background: #f8f8f8; }
+.highlight .c { color: #3D7B7B; font-style: italic } /* Comment */
+.highlight .err { border: 1px solid #F00 } /* Error */
+.highlight .k { color: #008000; font-weight: bold } /* Keyword */
+.highlight .o { color: #666 } /* Operator */
+.highlight .ch { color: #3D7B7B; font-style: italic } /* Comment.Hashbang */
+.highlight .cm { color: #3D7B7B; font-style: italic } /* Comment.Multiline */
+.highlight .cp { color: #9C6500 } /* Comment.Preproc */
+.highlight .cpf { color: #3D7B7B; font-style: italic } /* Comment.PreprocFile */
+.highlight .c1 { color: #3D7B7B; font-style: italic } /* Comment.Single */
+.highlight .cs { color: #3D7B7B; font-style: italic } /* Comment.Special */
+.highlight .gd { color: #A00000 } /* Generic.Deleted */
+.highlight .ge { font-style: italic } /* Generic.Emph */
+.highlight .ges { font-weight: bold; font-style: italic } /* Generic.EmphStrong */
+.highlight .gr { color: #E40000 } /* Generic.Error */
+.highlight .gh { color: #000080; font-weight: bold } /* Generic.Heading */
+.highlight .gi { color: #008400 } /* Generic.Inserted */
+.highlight .go { color: #717171 } /* Generic.Output */
+.highlight .gp { color: #000080; font-weight: bold } /* Generic.Prompt */
+.highlight .gs { font-weight: bold } /* Generic.Strong */
+.highlight .gu { color: #800080; font-weight: bold } /* Generic.Subheading */
+.highlight .gt { color: #04D } /* Generic.Traceback */
+.highlight .kc { color: #008000; font-weight: bold } /* Keyword.Constant */
+.highlight .kd { color: #008000; font-weight: bold } /* Keyword.Declaration */
+.highlight .kn { color: #008000; font-weight: bold } /* Keyword.Namespace */
+.highlight .kp { color: #008000 } /* Keyword.Pseudo */
+.highlight .kr { color: #008000; font-weight: bold } /* Keyword.Reserved */
+.highlight .kt { color: #B00040 } /* Keyword.Type */
+.highlight .m { color: #666 } /* Literal.Number */
+.highlight .s { color: #BA2121 } /* Literal.String */
+.highlight .na { color: #687822 } /* Name.Attribute */
+.highlight .nb { color: #008000 } /* Name.Builtin */
+.highlight .nc { color: #00F; font-weight: bold } /* Name.Class */
+.highlight .no { color: #800 } /* Name.Constant */
+.highlight .nd { color: #A2F } /* Name.Decorator */
+.highlight .ni { color: #717171; font-weight: bold } /* Name.Entity */
+.highlight .ne { color: #CB3F38; font-weight: bold } /* Name.Exception */
+.highlight .nf { color: #00F } /* Name.Function */
+.highlight .nl { color: #767600 } /* Name.Label */
+.highlight .nn { color: #00F; font-weight: bold } /* Name.Namespace */
+.highlight .nt { color: #008000; font-weight: bold } /* Name.Tag */
+.highlight .nv { color: #19177C } /* Name.Variable */
+.highlight .ow { color: #A2F; font-weight: bold } /* Operator.Word */
+.highlight .w { color: #BBB } /* Text.Whitespace */
+.highlight .mb { color: #666 } /* Literal.Number.Bin */
+.highlight .mf { color: #666 } /* Literal.Number.Float */
+.highlight .mh { color: #666 } /* Literal.Number.Hex */
+.highlight .mi { color: #666 } /* Literal.Number.Integer */
+.highlight .mo { color: #666 } /* Literal.Number.Oct */
+.highlight .sa { color: #BA2121 } /* Literal.String.Affix */
+.highlight .sb { color: #BA2121 } /* Literal.String.Backtick */
+.highlight .sc { color: #BA2121 } /* Literal.String.Char */
+.highlight .dl { color: #BA2121 } /* Literal.String.Delimiter */
+.highlight .sd { color: #BA2121; font-style: italic } /* Literal.String.Doc */
+.highlight .s2 { color: #BA2121 } /* Literal.String.Double */
+.highlight .se { color: #AA5D1F; font-weight: bold } /* Literal.String.Escape */
+.highlight .sh { color: #BA2121 } /* Literal.String.Heredoc */
+.highlight .si { color: #A45A77; font-weight: bold } /* Literal.String.Interpol */
+.highlight .sx { color: #008000 } /* Literal.String.Other */
+.highlight .sr { color: #A45A77 } /* Literal.String.Regex */
+.highlight .s1 { color: #BA2121 } /* Literal.String.Single */
+.highlight .ss { color: #19177C } /* Literal.String.Symbol */
+.highlight .bp { color: #008000 } /* Name.Builtin.Pseudo */
+.highlight .fm { color: #00F } /* Name.Function.Magic */
+.highlight .vc { color: #19177C } /* Name.Variable.Class */
+.highlight .vg { color: #19177C } /* Name.Variable.Global */
+.highlight .vi { color: #19177C } /* Name.Variable.Instance */
+.highlight .vm { color: #19177C } /* Name.Variable.Magic */
+.highlight .il { color: #666 } /* Literal.Number.Integer.Long */
+.highlight { position: relative; background: var(--code-bg); border: 1px solid var(--code-rule); border-radius: 4px; }
+.highlight pre { margin: 0; padding: .8rem .9rem; overflow-x: auto; color: var(--code-fg); font: 12.5px/1.5 var(--font-mono); }
+span.linenos { color: var(--lineno); user-select: none; padding: 0 .9rem 0 0; }
+body { margin: 0; }
+img { max-width: 100%; }
+</style>
+</head>
+<body>
+<div class="page">
+  <p class="preview"><strong>Docs preview</strong><span>The Envoy sandbox page merged in
+    <a href="https://github.com/envoyproxy/examples/pull/1470">envoyproxy/examples#1470</a>, built from <code>fbdcae6</code>.
+    It goes live on envoyproxy.io once the next examples release is pinned in Envoy's docs.</span></p>
+  <article>
+<section id="model-selection-and-transcoding">
+<span id="install-sandboxes-ai-transcoder"></span><h1>Model selection and transcoding<a class="headerlink" href="#model-selection-and-transcoding" title="Link to this heading"></a></h1>
+<aside class="sidebar">
+<p class="sidebar-title">Requirements</p>
+<dl class="simple">
+<dt><a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/start/sandboxes/setup#start-sandboxes-setup" title="(in envoy v1.40.0-dev-1d950c)"><span class="xref std std-ref">Sandbox environment</span></a></dt><dd><p>Setup your sandbox environment with Docker and Docker Compose,
+and clone the Envoy repository with Git.</p>
+</dd>
+</dl>
+<dl class="simple">
+<dt><a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/start/sandboxes/setup#start-sandboxes-setup-curl" title="(in envoy v1.40.0-dev-1d950c)"><span class="xref std std-ref">curl</span></a></dt><dd><p>Used to make HTTP requests.</p>
+</dd>
+<dt><a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/start/sandboxes/setup#start-sandboxes-setup-jq" title="(in envoy v1.40.0-dev-1d950c)"><span class="xref std std-ref">jq</span></a></dt><dd><p>Parse JSON output from the proxy.</p>
+</dd>
+<dt>API keys</dt><dd><p>For each provider you want to try: <a class="reference external" href="https://platform.openai.com/api-keys">OpenAI</a>,
+<a class="reference external" href="https://console.anthropic.com/settings/keys">Anthropic</a> and
+<a class="reference external" href="https://cloud.google.com/vertex-ai/generative-ai/docs/start/api-keys">Vertex AI</a>.</p>
+</dd>
+</dl>
+</aside>
+<p>This sandbox runs Envoy as an AI gateway: clients speak one API, OpenAI Chat Completions, to one endpoint,
+and Envoy sends each request to OpenAI, Anthropic or Gemini on Vertex AI in that provider’s own API.</p>
+<figure class="diagram"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 972 588" width="972" height="588" role="img" aria-labelledby="diagram-title diagram-desc" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+  <title id="diagram-title">One OpenAI endpoint, three providers: the AI Protocol Manager's AI filters read the model and transcode each request</title>
+  <desc id="diagram-desc">An OpenAI client sends POST /v1/chat/completions to Envoy. In the AI Protocol Manager, the request_info AI filter stores the request's model as the envoy.ai.model.request filter state object, which the routes match: gpt-* models go to OpenAI, claude-* models to Anthropic, gemini-* models to Vertex AI, and any other model gets a local 404. A second AI Protocol Manager runs two transcoder AI filters, from the client's API into the canonical form, OpenAI Chat Completions, and from it into the route's provider API, and converts the response back. One dynamic forward proxy cluster connects to api.openai.com, api.anthropic.com or aiplatform.googleapis.com over TLS.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#64748b"/></marker>
+    <marker id="arrow-indigo" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#4f46e5"/></marker>
+  </defs>
+
+  <rect x="0.5" y="0.5" width="971" height="587" rx="18" fill="#ffffff" stroke="#e2e8f0"/>
+
+  <!-- Client -->
+  <rect x="316" y="20" width="340" height="72" rx="12" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="332" y="44"><tspan font-size="14" font-weight="700" fill="#0f172a">Client</tspan><tspan dx="8" font-size="12" fill="#64748b">OpenAI SDK or curl</tspan></text>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" fill="#334155">
+    <text x="332" y="64">POST /v1/chat/completions</text>
+    <text x="332" y="81">{"model": "claude-haiku-4-5", ...}</text>
+  </g>
+  <line x1="486" y1="94" x2="486" y2="156" stroke="#64748b" stroke-width="1.6" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <text x="496" y="112" font-size="12" fill="#64748b">OpenAI API</text>
+
+  <!-- Envoy -->
+  <rect x="20" y="120" width="932" height="334" rx="16" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text x="36" y="146" font-size="16" font-weight="700" fill="#0f172a">Envoy</text>
+  <text x="936" y="146" font-size="12" text-anchor="end" fill="#64748b">listener :10000</text>
+
+  <!-- AI Protocol Manager: read the model -->
+  <rect x="36" y="158" width="900" height="56" rx="10" fill="#eef2ff" stroke="#6366f1" stroke-width="1.8"/>
+  <text x="52" y="182" font-size="13" font-weight="700" fill="#3730a3">AI Protocol Manager</text>
+  <text x="52" y="198" font-size="11.5" fill="#4f46e5">AI filters</text>
+  <rect x="228" y="170" width="132" height="32" rx="16" fill="#e0e7ff" stroke="#4f46e5" stroke-width="1.5"/>
+  <text x="294" y="190.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.5" font-weight="700" text-anchor="middle" fill="#312e81">request_info</text>
+  <text x="376" y="191" font-size="13" fill="#1e1b4b">stores the request's model as <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.5" font-weight="700">envoy.ai.model.request</tspan>, which the routes match</text>
+
+  <!-- Routes -->
+  <path d="M486 214V228M310 228H872" fill="none" stroke="#64748b" stroke-width="1.6"/>
+  <g stroke="#64748b" stroke-width="1.6" marker-end="url(#arrow)">
+    <line x1="310" y1="228" x2="310" y2="242"/>
+    <line x1="518" y1="228" x2="518" y2="242"/>
+    <line x1="726" y1="228" x2="726" y2="242"/>
+    <line x1="872" y1="228" x2="872" y2="242"/>
+  </g>
+  <text x="52" y="257" font-size="13" font-weight="700" fill="#334155">routes</text>
+  <text x="52" y="271" font-size="11.5" fill="#64748b">match the model</text>
+  <g fill="#ffffff" stroke="#94a3b8" stroke-width="1.5">
+    <rect x="250" y="244" width="120" height="30" rx="15"/>
+    <rect x="458" y="244" width="120" height="30" rx="15"/>
+    <rect x="666" y="244" width="120" height="30" rx="15"/>
+  </g>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.5" font-weight="700" text-anchor="middle" fill="#334155">
+    <text x="310" y="263.5">gpt-*</text>
+    <text x="518" y="263.5">claude-*</text>
+    <text x="726" y="263.5">gemini-*</text>
+  </g>
+  <rect x="810" y="244" width="124" height="30" rx="15" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <text x="872" y="263.5" font-size="11.5" text-anchor="middle" fill="#475569">anything else → 404</text>
+
+  <g stroke="#64748b" stroke-width="1.6" marker-end="url(#arrow)">
+    <line x1="310" y1="274" x2="310" y2="292"/>
+    <line x1="518" y1="274" x2="518" y2="292"/>
+    <line x1="726" y1="274" x2="726" y2="292"/>
+  </g>
+
+  <!-- AI Protocol Manager: transcode -->
+  <rect x="36" y="294" width="900" height="94" rx="10" fill="#eef2ff" stroke="#6366f1" stroke-width="1.8"/>
+  <text x="52" y="318" font-size="13" font-weight="700" fill="#3730a3">AI Protocol Manager</text>
+  <text x="52" y="334" font-size="11.5" fill="#4f46e5">AI filters</text>
+  <rect x="228" y="306" width="220" height="30" rx="15" fill="#e0e7ff" stroke="#4f46e5" stroke-width="1.5"/>
+  <text x="338" y="325.5" text-anchor="middle" fill="#312e81"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.5" font-weight="700">transcoder</tspan><tspan font-size="12"> client API → IR</tspan></text>
+  <line x1="450" y1="321" x2="474" y2="321" stroke="#4f46e5" stroke-width="1.6" marker-end="url(#arrow-indigo)"/>
+  <rect x="476" y="306" width="232" height="30" rx="15" fill="#e0e7ff" stroke="#4f46e5" stroke-width="1.5"/>
+  <text x="592" y="325.5" text-anchor="middle" fill="#312e81"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.5" font-weight="700">transcoder</tspan><tspan font-size="12"> IR → provider API</tspan></text>
+  <text x="724" y="325" font-size="11.5" fill="#4f46e5">IR: OpenAI Chat Completions</text>
+  <g fill="#ffffff" stroke="#a5b4fc" stroke-width="1.5">
+    <rect x="220" y="346" width="180" height="30" rx="8"/>
+    <rect x="428" y="346" width="180" height="30" rx="8"/>
+    <rect x="636" y="346" width="180" height="30" rx="8"/>
+  </g>
+  <g font-size="12.5" text-anchor="middle" fill="#1e1b4b">
+    <text x="310" y="365.5">OpenAI Chat Completions</text>
+    <text x="518" y="365.5">Anthropic Messages</text>
+    <text x="726" y="365.5">Gemini GenerateContent</text>
+  </g>
+
+  <g stroke="#64748b" stroke-width="1.6" marker-end="url(#arrow)">
+    <line x1="310" y1="376" x2="310" y2="404"/>
+    <line x1="518" y1="376" x2="518" y2="404"/>
+    <line x1="726" y1="376" x2="726" y2="404"/>
+  </g>
+
+  <!-- One dynamic forward proxy cluster -->
+  <rect x="36" y="406" width="900" height="34" rx="10" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="52" y="428" font-size="13" font-weight="700" fill="#334155">dynamic forward proxy</text>
+  <text x="228" y="428" font-size="12.5" fill="#334155">one cluster for every provider, over TLS with the route's host as SNI</text>
+
+  <!-- Providers -->
+  <g stroke="#64748b" stroke-width="1.6" marker-start="url(#arrow)" marker-end="url(#arrow)">
+    <line x1="310" y1="442" x2="310" y2="478"/>
+    <line x1="518" y1="442" x2="518" y2="478"/>
+    <line x1="726" y1="442" x2="726" y2="478"/>
+  </g>
+  <text x="736" y="470" font-size="12" fill="#64748b">provider API</text>
+  <g fill="#ffffff" stroke="#94a3b8" stroke-width="1.5">
+    <rect x="212" y="480" width="196" height="86" rx="10"/>
+    <rect x="420" y="480" width="196" height="86" rx="10"/>
+    <rect x="628" y="480" width="196" height="86" rx="10"/>
+  </g>
+  <g font-size="13.5" font-weight="700" fill="#0f172a">
+    <text x="226" y="502">OpenAI</text>
+    <text x="434" y="502">Anthropic</text>
+    <text x="642" y="502">Vertex AI (Gemini)</text>
+  </g>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="11" fill="#334155">
+    <text x="226" y="522">api.openai.com</text>
+    <text x="226" y="539">/v1/chat/completions</text>
+    <text x="434" y="522">api.anthropic.com</text>
+    <text x="434" y="539">/v1/messages</text>
+    <text x="642" y="522">aiplatform.googleapis.com</text>
+    <text x="642" y="539">...:generateContent</text>
+    <text x="642" y="556">...:streamGenerateContent</text>
+  </g>
+</svg></figure>
+<p>For each request, Envoy:</p>
+<ul class="simple">
+<li><p>reads the request’s <code class="docutils literal notranslate"><span class="pre">model</span></code> with the <a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/ai_protocol_manager_filter#config-http-filters-ai-protocol-manager" title="(in envoy v1.40.0-dev-1d950c)"><span class="xref std std-ref">AI Protocol Manager</span></a>,
+whose request info AI filter stores it as the <code class="docutils literal notranslate"><span class="pre">envoy.ai.model.request</span></code>
+<a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/configuration/advanced/well_known_filter_state#well-known-filter-state" title="(in envoy v1.40.0-dev-1d950c)"><span class="xref std std-ref">filter state object</span></a>, and picks a route on it: <code class="docutils literal notranslate"><span class="pre">gpt-*</span></code> models go to OpenAI,
+<code class="docutils literal notranslate"><span class="pre">claude-*</span></code> models to Anthropic, and <code class="docutils literal notranslate"><span class="pre">gemini-*</span></code> models to Vertex AI. Any other model is answered by Envoy with
+a <code class="docutils literal notranslate"><span class="pre">404</span></code>.</p></li>
+<li><p>converts the request into the provider’s API, and the provider’s response (a JSON body or a stream of
+server-sent events) back into OpenAI’s, with the AI Protocol Manager’s transcoder AI filter.</p></li>
+<li><p>sends it through a single <a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/http/http_proxy#arch-overview-http-dynamic-forward-proxy" title="(in envoy v1.40.0-dev-1d950c)"><span class="xref std std-ref">dynamic forward proxy</span></a> cluster to the
+provider’s host, which the route names, adding the provider’s API key on the way.</p></li>
+</ul>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>The AI Protocol Manager and its transcoder are alpha, and their APIs are a work in progress: Envoy logs warnings
+about them at startup.</p>
+</div>
+<section id="step-1-set-your-api-keys">
+<h2>Step 1: Set your API keys<a class="headerlink" href="#step-1-set-your-api-keys" title="Link to this heading"></a></h2>
+<p>Change to the <code class="docutils literal notranslate"><span class="pre">ai-transcoder</span></code> directory, and export the API key of each provider you want to use.</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nb">pwd</span>
+<span class="go">examples/ai-transcoder</span>
+<span class="gp">$ </span><span class="nb">export</span><span class="w"> </span><span class="nv">OPENAI_API_KEY</span><span class="o">=</span>sk-...
+<span class="gp">$ </span><span class="nb">export</span><span class="w"> </span><span class="nv">ANTHROPIC_API_KEY</span><span class="o">=</span>sk-ant-...
+<span class="gp">$ </span><span class="nb">export</span><span class="w"> </span><span class="nv">VERTEX_API_KEY</span><span class="o">=</span>...
+</pre></div>
+</div>
+<p>For Vertex AI, also export the Google Cloud project the key belongs to, and the location to call, <code class="docutils literal notranslate"><span class="pre">global</span></code> by
+default:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nb">export</span><span class="w"> </span><span class="nv">VERTEX_PROJECT</span><span class="o">=</span>my-project
+<span class="gp">$ </span><span class="nb">export</span><span class="w"> </span><span class="nv">VERTEX_LOCATION</span><span class="o">=</span>global
+</pre></div>
+</div>
+<p>The keys are passed to the Envoy container as environment variables, and Envoy adds them to the requests it sends to
+each provider: clients do not need them. A provider whose key is not set answers with its own authentication error.</p>
+</section>
+<section id="step-2-start-the-sandbox">
+<h2>Step 2: Start the sandbox<a class="headerlink" href="#step-2-start-the-sandbox" title="Link to this heading"></a></h2>
+<p>Build and start the proxy.</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>docker<span class="w"> </span>compose<span class="w"> </span>pull
+<span class="gp">$ </span>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>--build<span class="w"> </span>-d
+<span class="gp">$ </span>docker<span class="w"> </span>compose<span class="w"> </span>ps
+
+<span class="go">NAME                    IMAGE                 COMMAND                  SERVICE   CREATED          STATUS                    PORTS</span>
+<span class="go">ai-transcoder-proxy-1   ai-transcoder-proxy   "/docker-entrypoint.…"   proxy     10 seconds ago   Up 9 seconds (healthy)    0.0.0.0:9901-&gt;9901/tcp, 0.0.0.0:10000-&gt;10000/tcp</span>
+</pre></div>
+</div>
+<p>Envoy listens for AI requests on port <code class="docutils literal notranslate"><span class="pre">10000</span></code>, and serves its admin interface on port <code class="docutils literal notranslate"><span class="pre">9901</span></code>.</p>
+<p>Alternatively, <a class="reference download internal" href="https://github.com/envoyproxy/examples/blob/fbdcae6f549a6e20ed071596f76019e5b0786b8f/ai-transcoder/run-sandbox.sh"><code class="xref download docutils literal notranslate"><span class="pre">run-sandbox.sh</span></code></a> does steps 1 and 2: it asks for each
+key, without echoing it, and for the Vertex AI project, then builds and starts the sandbox and follows Envoy’s log,
+which shows where each request went:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>./run-sandbox.sh
+</pre></div>
+</div>
+<div class="admonition tip">
+<p class="admonition-title">Tip</p>
+<p>If either port is taken on your machine, set <code class="docutils literal notranslate"><span class="pre">PORT_PROXY</span></code> or <code class="docutils literal notranslate"><span class="pre">PORT_ADMIN</span></code> before starting the sandbox, and use
+those ports in the steps below.</p>
+</div>
+</section>
+<section id="step-3-send-the-same-request-to-each-provider">
+<h2>Step 3: Send the same request to each provider<a class="headerlink" href="#step-3-send-the-same-request-to-each-provider" title="Link to this heading"></a></h2>
+<p>Send an OpenAI chat completion request to Envoy, asking for a Claude model:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>curl<span class="w"> </span>-s<span class="w"> </span>http://localhost:10000/v1/chat/completions<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>-H<span class="w"> </span><span class="s1">'content-type: application/json'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>-d<span class="w"> </span><span class="s1">'{"model": "claude-haiku-4-5", "messages": [{"role": "user", "content": "In one short sentence, what is Envoy proxy?"}]}'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="p">|</span><span class="w"> </span>jq
+<span class="go">{</span>
+<span class="go">  "choices": [</span>
+<span class="go">    {</span>
+<span class="go">      "finish_reason": "stop",</span>
+<span class="go">      "index": 0,</span>
+<span class="go">      "message": {</span>
+<span class="go">        "content": "Envoy is an open-source, high-performance proxy for cloud-native applications.",</span>
+<span class="go">        "role": "assistant"</span>
+<span class="go">      }</span>
+<span class="go">    }</span>
+<span class="go">  ],</span>
+<span class="go">  "created": 1790803216,</span>
+<span class="go">  "id": "msg_01XWk8n3jWP3kDmrzHfQyM4B",</span>
+<span class="go">  "model": "claude-haiku-4-5-20251001",</span>
+<span class="go">  "object": "chat.completion",</span>
+<span class="go">  "usage": {</span>
+<span class="go">    "completion_tokens": 19,</span>
+<span class="go">    "prompt_tokens": 18,</span>
+<span class="go">    "total_tokens": 37</span>
+<span class="go">  }</span>
+<span class="go">}</span>
+</pre></div>
+</div>
+<p>Anthropic answered, but the reply is an OpenAI <code class="docutils literal notranslate"><span class="pre">chat.completion</span></code>: Envoy sent the request to Anthropic’s Messages API
+and converted the answer, including the stop reason and the token usage.</p>
+<p>Only the <code class="docutils literal notranslate"><span class="pre">model</span></code> changes between providers:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="k">for</span><span class="w"> </span>model<span class="w"> </span><span class="k">in</span><span class="w"> </span>gpt-4o-mini<span class="w"> </span>claude-haiku-4-5<span class="w"> </span>gemini-2.5-flash<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="go">    curl -s http://localhost:10000/v1/chat/completions \</span>
+<span class="go">      -H 'content-type: application/json' \</span>
+<span class="go">      -d "{\"model\": \"${model}\", \"messages\": [{\"role\": \"user\", \"content\": \"In one short sentence, what is Envoy proxy?\"}]}" \</span>
+<span class="go">      | jq -r '"\(.model): \(.choices[0].message.content)"'</span>
+<span class="go">  done</span>
+<span class="go">gpt-4o-mini-2024-07-18: Envoy is an open-source edge and service proxy designed for cloud-native applications.</span>
+<span class="go">claude-haiku-4-5-20251001: Envoy is an open-source, high-performance proxy for cloud-native applications.</span>
+<span class="go">gemini-2.5-flash: Envoy is an open-source, high-performance edge and service proxy designed for cloud-native applications.</span>
+</pre></div>
+</div>
+</section>
+<section id="step-4-stream-a-response">
+<h2>Step 4: Stream a response<a class="headerlink" href="#step-4-stream-a-response" title="Link to this heading"></a></h2>
+<p>Ask for a stream from Gemini:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>curl<span class="w"> </span>-sN<span class="w"> </span>http://localhost:10000/v1/chat/completions<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>-H<span class="w"> </span><span class="s1">'content-type: application/json'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>-d<span class="w"> </span><span class="s1">'{"model": "gemini-2.5-flash", "stream": true, "messages": [{"role": "user", "content": "Count from 1 to 5."}]}'</span>
+<span class="go">data: {"choices":[{"delta":{"content":"1, 2, 3","role":"assistant"},"finish_reason":null,"index":0}],"created":1790803221,"id":"FXzcaMjLO5Te4_UPl9jNkQ8","model":"gemini-2.5-flash","object":"chat.completion.chunk","usage":{"prompt_tokens":8,"total_tokens":8}}</span>
+
+<span class="go">data: {"choices":[{"delta":{"content":", 4, 5","role":"assistant"},"finish_reason":"stop","index":0}],"created":1790803221,"id":"FXzcaMjLO5Te4_UPl9jNkQ8","model":"gemini-2.5-flash","object":"chat.completion.chunk","usage":{"completion_tokens":13,"prompt_tokens":8,"total_tokens":21}}</span>
+
+<span class="go">data: [DONE]</span>
+</pre></div>
+</div>
+<p>Envoy sent this request to Gemini’s <code class="docutils literal notranslate"><span class="pre">streamGenerateContent</span></code> method rather than <code class="docutils literal notranslate"><span class="pre">generateContent</span></code>, and converted
+each event of Gemini’s stream into an OpenAI <code class="docutils literal notranslate"><span class="pre">chat.completion.chunk</span></code>.</p>
+<p>Gemini’s streams just end, so Envoy also added the <code class="docutils literal notranslate"><span class="pre">data:</span> <span class="pre">[DONE]</span></code> event that OpenAI clients wait for.
+Anthropic’s named events, from <code class="docutils literal notranslate"><span class="pre">message_start</span></code> to <code class="docutils literal notranslate"><span class="pre">message_stop</span></code>, are converted the same way.</p>
+</section>
+<section id="step-5-see-where-each-request-went">
+<h2>Step 5: See where each request went<a class="headerlink" href="#step-5-see-where-each-request-went" title="Link to this heading"></a></h2>
+<p>Envoy’s access log shows each request’s model, and the provider host and path it was sent to:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>docker<span class="w"> </span>compose<span class="w"> </span>logs<span class="w"> </span>proxy<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>--<span class="w"> </span><span class="s1">' -&gt; '</span>
+<span class="go">proxy-1  | claude-haiku-4-5 -&gt; api.anthropic.com/v1/messages 200 via_upstream</span>
+<span class="go">proxy-1  | gpt-4o-mini -&gt; api.openai.com/v1/chat/completions 200 via_upstream</span>
+<span class="go">proxy-1  | claude-haiku-4-5 -&gt; api.anthropic.com/v1/messages 200 via_upstream</span>
+<span class="go">proxy-1  | gemini-2.5-flash -&gt; aiplatform.googleapis.com/v1/projects/my-project/locations/global/publishers/google/models/gemini-2.5-flash:generateContent 200 via_upstream</span>
+<span class="go">proxy-1  | gemini-2.5-flash -&gt; aiplatform.googleapis.com/v1/projects/my-project/locations/global/publishers/google/models/gemini-2.5-flash:streamGenerateContent?alt=sse 200 via_upstream</span>
+</pre></div>
+</div>
+<p>The log reads the model from the <code class="docutils literal notranslate"><span class="pre">envoy.ai.model.request</span></code> filter state object, with
+<code class="docutils literal notranslate"><span class="pre">%FILTER_STATE(envoy.ai.model.request:PLAIN)%</span></code>.</p>
+<p>Every client sent its request to <code class="docutils literal notranslate"><span class="pre">/v1/chat/completions</span></code>. The Gemini requests show the model moved from the request
+body into the Vertex AI path, and the streaming one calling <code class="docutils literal notranslate"><span class="pre">streamGenerateContent</span></code>.</p>
+</section>
+<section id="step-6-ask-for-a-model-that-no-provider-serves">
+<h2>Step 6: Ask for a model that no provider serves<a class="headerlink" href="#step-6-ask-for-a-model-that-no-provider-serves" title="Link to this heading"></a></h2>
+<p>A model that no route matches never leaves Envoy. It is answered with a <code class="docutils literal notranslate"><span class="pre">404</span></code>, in OpenAI’s error format so that
+OpenAI clients can read it:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>curl<span class="w"> </span>-si<span class="w"> </span>http://localhost:10000/v1/chat/completions<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>-H<span class="w"> </span><span class="s1">'content-type: application/json'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>-d<span class="w"> </span><span class="s1">'{"model": "llama-3.1-8b", "messages": [{"role": "user", "content": "Hi"}]}'</span>
+<span class="go">HTTP/1.1 404 Not Found</span>
+<span class="go">content-type: application/json</span>
+<span class="go">content-length: 133</span>
+<span class="go">date: Wed, 30 Sep 2026 21:36:05 GMT</span>
+<span class="go">server: envoy</span>
+
+<span class="go">{"error": {"message": "No backend serves this model.", "type": "invalid_request_error", "param": "model", "code": "model_not_found"}}</span>
+</pre></div>
+</div>
+</section>
+<section id="step-7-check-the-transcoder-s-statistics">
+<h2>Step 7: Check the transcoder’s statistics<a class="headerlink" href="#step-7-check-the-transcoder-s-statistics" title="Link to this heading"></a></h2>
+<p>The AI Protocol Manager counts the request bodies it parsed, the models it read, and the payloads it transcoded
+(each request, JSON response and streamed event), and the ones it could not:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>curl<span class="w"> </span>-s<span class="w"> </span><span class="s2">"http://localhost:9901/stats?filter=ai_protocol_manager.(request_parsed|request_info.published|transcoder)"</span>
+<span class="go">ai_protocol_manager.request_info.published: 6</span>
+<span class="go">ai_protocol_manager.request_parsed: 11</span>
+<span class="go">ai_protocol_manager.transcoder.failed: 0</span>
+<span class="go">ai_protocol_manager.transcoder.transcoded: 22</span>
+<span class="go">ai_protocol_manager.transcoder.unresolved: 0</span>
+</pre></div>
+</div>
+<p>The sandbox runs two AI Protocol Managers, which count together: one read the model of all six requests, and the
+other parsed the five that a provider served, to transcode them.</p>
+</section>
+<section id="step-8-use-an-openai-sdk">
+<h2>Step 8: Use an OpenAI SDK<a class="headerlink" href="#step-8-use-an-openai-sdk" title="Link to this heading"></a></h2>
+<p>Any OpenAI client library can use the sandbox, by pointing its base URL at Envoy. For example, with the
+<a class="reference external" href="https://pypi.org/project/openai/">OpenAI Python library</a>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">openai</span><span class="w"> </span><span class="kn">import</span> <span class="n">OpenAI</span>
+
+<span class="c1"># Envoy adds each provider's key, so the client's is not used.</span>
+<span class="n">client</span> <span class="o">=</span> <span class="n">OpenAI</span><span class="p">(</span><span class="n">base_url</span><span class="o">=</span><span class="s2">"http://localhost:10000/v1"</span><span class="p">,</span> <span class="n">api_key</span><span class="o">=</span><span class="s2">"unused"</span><span class="p">)</span>
+
+<span class="k">for</span> <span class="n">model</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">"gpt-4o-mini"</span><span class="p">,</span> <span class="s2">"claude-haiku-4-5"</span><span class="p">,</span> <span class="s2">"gemini-2.5-flash"</span><span class="p">]:</span>
+    <span class="n">stream</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">chat</span><span class="o">.</span><span class="n">completions</span><span class="o">.</span><span class="n">create</span><span class="p">(</span>
+        <span class="n">model</span><span class="o">=</span><span class="n">model</span><span class="p">,</span>
+        <span class="n">messages</span><span class="o">=</span><span class="p">[{</span><span class="s2">"role"</span><span class="p">:</span> <span class="s2">"user"</span><span class="p">,</span> <span class="s2">"content"</span><span class="p">:</span> <span class="s2">"Write a haiku about proxies."</span><span class="p">}],</span>
+        <span class="n">stream</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">model</span><span class="si">}</span><span class="s2">:"</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">chunk</span> <span class="ow">in</span> <span class="n">stream</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">chunk</span><span class="o">.</span><span class="n">choices</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="n">chunk</span><span class="o">.</span><span class="n">choices</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">delta</span><span class="o">.</span><span class="n">content</span> <span class="ow">or</span> <span class="s2">""</span><span class="p">,</span> <span class="n">end</span><span class="o">=</span><span class="s2">""</span><span class="p">,</span> <span class="n">flush</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">"</span><span class="se">\n</span><span class="s2">"</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="how-the-configuration-works">
+<h2>How the configuration works<a class="headerlink" href="#how-the-configuration-works" title="Link to this heading"></a></h2>
+<section id="routing-on-the-model">
+<h3>Routing on the model<a class="headerlink" href="#routing-on-the-model" title="Link to this heading"></a></h3>
+<p>The model is in the request body, but Envoy picks a route as soon as the request headers arrive, before the body is
+read. So every chat request starts on the last route, <code class="docutils literal notranslate"><span class="pre">unknown_model</span></code>. It declares the request’s API for the first
+AI Protocol Manager, <code class="docutils literal notranslate"><span class="pre">read_model</span></code>, which therefore parses the body:</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="linenos">109</span><span class="w">              </span><span class="c1"># Every chat request starts on this route, as its model is only known once its body is</span>
+<span class="linenos">110</span><span class="w">              </span><span class="c1"># read. It stays here, and is answered locally, when no route above serves the model.</span>
+<span class="linenos">111</span><span class="w">              </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">unknown_model</span>
+<span class="linenos">112</span><span class="w">                </span><span class="nt">match</span><span class="p">:</span>
+<span class="linenos">113</span><span class="w">                  </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/v1/chat/completions</span>
+<span class="linenos">114</span><span class="w">                </span><span class="nt">direct_response</span><span class="p">:</span>
+<span class="linenos">115</span><span class="w">                  </span><span class="nt">status</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">404</span>
+<span class="linenos">116</span><span class="w">                  </span><span class="nt">body</span><span class="p">:</span>
+<span class="linenos">117</span><span class="w">                    </span><span class="nt">inline_string</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">&gt;-</span>
+<span class="linenos">118</span><span class="w">                      </span><span class="no">{"error": {"message": "No backend serves this model.", "type": "invalid_request_error",</span>
+<span class="linenos">119</span><span class="w">                      </span><span class="no">"param": "model", "code": "model_not_found"}}</span>
+<span class="linenos">120</span><span class="w">                </span><span class="nt">response_headers_to_add</span><span class="p">:</span>
+<span class="linenos">121</span><span class="w">                </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">header</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="nv">content-type</span><span class="p p-Indicator">,</span><span class="nt"> value</span><span class="p">:</span><span class="w"> </span><span class="nv">application/json</span><span class="p p-Indicator">}</span>
+<span class="linenos">122</span><span class="w">                  </span><span class="nt">append_action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OVERWRITE_IF_EXISTS_OR_ADD</span>
+<span class="hll"><span class="linenos">123</span><span class="w">                </span><span class="nt">typed_per_filter_config</span><span class="p">:</span>
+</span><span class="hll"><span class="linenos">124</span><span class="w">                  </span><span class="nt">read_model</span><span class="p">:</span>
+</span><span class="hll"><span class="linenos">125</span><span class="w">                    </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.filters.http.ai_protocol_manager.v3.AiProtocolManagerPerRoute</span>
+</span><span class="hll"><span class="linenos">126</span><span class="w">                    </span><span class="nt">request</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">llm_protocol</span><span class="p">:</span><span class="w"> </span><span class="nv">OPENAI_CHAT_COMPLETIONS</span><span class="p p-Indicator">}</span>
+</span></pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">read_model</span></code> runs the request info AI filter, which stores the model as the <code class="docutils literal notranslate"><span class="pre">envoy.ai.model.request</span></code> filter state
+object. As that filter only reads the request, <code class="docutils literal notranslate"><span class="pre">read_model</span></code> forwards the body as it was received. The
+<code class="docutils literal notranslate"><span class="pre">set_filter_state</span></code> filter then clears the route cache, so that the route is picked again, now that the model is
+known:</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="linenos">127</span><span class="w">          </span><span class="nt">http_filters</span><span class="p">:</span>
+<span class="linenos">128</span><span class="w">          </span><span class="c1"># Stores the request's model as the envoy.ai.model.request filter state object, and forwards</span>
+<span class="linenos">129</span><span class="w">          </span><span class="c1"># the body as received.</span>
+<span class="linenos">130</span><span class="w">          </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">read_model</span>
+<span class="linenos">131</span><span class="w">            </span><span class="nt">typed_config</span><span class="p">:</span>
+<span class="linenos">132</span><span class="w">              </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.filters.http.ai_protocol_manager.v3.AiProtocolManager</span>
+<span class="linenos">133</span><span class="w">              </span><span class="nt">request_handling</span><span class="p">:</span>
+<span class="linenos">134</span><span class="w">                </span><span class="nt">reserialize_body</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">DISABLE</span>
+<span class="linenos">135</span><span class="w">              </span><span class="nt">filters</span><span class="p">:</span>
+<span class="linenos">136</span><span class="w">              </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">envoy.http.ai_filters.request_info</span>
+<span class="linenos">137</span><span class="w">                </span><span class="nt">typed_config</span><span class="p">:</span>
+<span class="linenos">138</span><span class="w">                  </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.http.ai_filters.request_info.v3.RequestInfo</span>
+<span class="linenos">139</span><span class="w">          </span><span class="c1"># Picks the route again, on the model.</span>
+<span class="linenos">140</span><span class="w">          </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">envoy.filters.http.set_filter_state</span>
+<span class="linenos">141</span><span class="w">            </span><span class="nt">typed_config</span><span class="p">:</span>
+<span class="linenos">142</span><span class="w">              </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.filters.http.set_filter_state.v3.Config</span>
+<span class="linenos">143</span><span class="w">              </span><span class="nt">clear_route_cache</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</pre></div>
+</div>
+<p>Each provider has a route that matches its models. Here is Anthropic’s, in the
+<a class="reference download internal" href="https://github.com/envoyproxy/examples/blob/fbdcae6f549a6e20ed071596f76019e5b0786b8f/ai-transcoder/envoy.yaml"><code class="xref download docutils literal notranslate"><span class="pre">envoy.yaml</span></code></a> configuration:</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="linenos">56</span><span class="w">              </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">anthropic</span>
+<span class="linenos">57</span><span class="w">                </span><span class="nt">match</span><span class="p">:</span>
+<span class="linenos">58</span><span class="w">                  </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/v1/chat/completions</span>
+<span class="hll"><span class="linenos">59</span><span class="w">                  </span><span class="nt">filter_state</span><span class="p">:</span>
+</span><span class="hll"><span class="linenos">60</span><span class="w">                  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">envoy.ai.model.request</span>
+</span><span class="hll"><span class="linenos">61</span><span class="w">                    </span><span class="nt">string_match</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">prefix</span><span class="p">:</span><span class="w"> </span><span class="nv">claude-</span><span class="p p-Indicator">}</span>
+</span><span class="linenos">62</span><span class="w">                </span><span class="nt">route</span><span class="p">:</span>
+<span class="linenos">63</span><span class="w">                  </span><span class="nt">cluster</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dynamic_forward_proxy_cluster</span>
+<span class="linenos">64</span><span class="w">                  </span><span class="nt">timeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">120s</span>
+<span class="linenos">65</span><span class="w">                  </span><span class="nt">regex_rewrite</span><span class="p">:</span>
+<span class="linenos">66</span><span class="w">                    </span><span class="nt">pattern</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">regex</span><span class="p">:</span><span class="w"> </span><span class="s">'^/v1/chat/completions$'</span><span class="p p-Indicator">}</span>
+<span class="linenos">67</span><span class="w">                    </span><span class="nt">substitution</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/v1/messages</span>
+<span class="linenos">68</span><span class="w">                </span><span class="nt">request_headers_to_remove</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">authorization</span><span class="p p-Indicator">]</span>
+<span class="linenos">69</span><span class="w">                </span><span class="nt">request_headers_to_add</span><span class="p">:</span>
+<span class="linenos">70</span><span class="w">                </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">header</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="nv">x-api-key</span><span class="p p-Indicator">,</span><span class="nt"> value</span><span class="p">:</span><span class="w"> </span><span class="s">"%ENVIRONMENT(ANTHROPIC_API_KEY)%"</span><span class="p p-Indicator">}</span>
+<span class="linenos">71</span><span class="w">                  </span><span class="nt">append_action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OVERWRITE_IF_EXISTS_OR_ADD</span>
+<span class="linenos">72</span><span class="w">                </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">header</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="nv">anthropic-version</span><span class="p p-Indicator">,</span><span class="nt"> value</span><span class="p">:</span><span class="w"> </span><span class="s">"2023-06-01"</span><span class="p p-Indicator">}</span>
+<span class="linenos">73</span><span class="w">                  </span><span class="nt">append_action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OVERWRITE_IF_EXISTS_OR_ADD</span>
+<span class="hll"><span class="linenos">74</span><span class="w">                </span><span class="nt">typed_per_filter_config</span><span class="p">:</span>
+</span><span class="hll"><span class="linenos">75</span><span class="w">                  </span><span class="nt">transcode</span><span class="p">:</span>
+</span><span class="hll"><span class="linenos">76</span><span class="w">                    </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.filters.http.ai_protocol_manager.v3.AiProtocolManagerPerRoute</span>
+</span><span class="hll"><span class="linenos">77</span><span class="w">                    </span><span class="nt">request</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">llm_protocol</span><span class="p">:</span><span class="w"> </span><span class="nv">OPENAI_CHAT_COMPLETIONS</span><span class="p p-Indicator">}</span>
+</span><span class="hll"><span class="linenos">78</span><span class="w">                    </span><span class="nt">response</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">llm_protocol</span><span class="p">:</span><span class="w"> </span><span class="nv">ANTHROPIC_MESSAGES</span><span class="p p-Indicator">}</span>
+</span><span class="linenos">79</span><span class="w">                  </span><span class="nt">envoy.filters.http.dynamic_forward_proxy</span><span class="p">:</span>
+<span class="linenos">80</span><span class="w">                    </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.filters.http.dynamic_forward_proxy.v3.PerRouteConfig</span>
+<span class="linenos">81</span><span class="w">                    </span><span class="nt">host_rewrite_literal</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">api.anthropic.com</span>
+</pre></div>
+</div>
+<p>The route:</p>
+<ul class="simple">
+<li><p>matches a model starting with <code class="docutils literal notranslate"><span class="pre">claude-</span></code>, with a <a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/api-v3/config/route/v3/route_components.proto#envoy-v3-api-field-config-route-v3-routematch-filter-state" title="(in envoy v1.40.0-dev-1d950c)"><span class="xref std std-ref">filter state</span></a>
+matcher on <code class="docutils literal notranslate"><span class="pre">envoy.ai.model.request</span></code>.</p></li>
+<li><p>declares the APIs to transcode between, with the AI Protocol Manager’s
+<a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/api-v3/extensions/filters/http/ai_protocol_manager/v3/ai_protocol_manager.proto#envoy-v3-api-msg-extensions-filters-http-ai-protocol-manager-v3-aiprotocolmanagerperroute" title="(in envoy v1.40.0-dev-1d950c)"><span class="xref std std-ref">per-route configuration</span></a>
+for the second AI Protocol Manager, <code class="docutils literal notranslate"><span class="pre">transcode</span></code>: the client’s request API is OpenAI Chat Completions, and the
+provider’s API is Anthropic Messages.</p></li>
+<li><p>names the provider’s host for the dynamic forward proxy, with <code class="docutils literal notranslate"><span class="pre">host_rewrite_literal</span></code>.</p></li>
+<li><p>rewrites the path to Anthropic’s, removes the client’s <code class="docutils literal notranslate"><span class="pre">authorization</span></code> header, and adds Anthropic’s key header,
+whose value Envoy reads from the <code class="docutils literal notranslate"><span class="pre">ANTHROPIC_API_KEY</span></code> environment variable.</p></li>
+</ul>
+<p>The routes only differ in these settings:</p>
+<div class="table-wrap"><table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Model</p></th>
+<th class="head"><p>Provider API</p></th>
+<th class="head"><p>Host</p></th>
+<th class="head"><p>Path</p></th>
+<th class="head"><p>API key header</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">gpt-*</span></code></p></td>
+<td><p>OpenAI Chat Completions</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">api.openai.com</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">/v1/chat/completions</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">authorization:</span> <span class="pre">Bearer</span> <span class="pre">$OPENAI_API_KEY</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">claude-*</span></code></p></td>
+<td><p>Anthropic Messages</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">api.anthropic.com</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">/v1/messages</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">x-api-key:</span> <span class="pre">$ANTHROPIC_API_KEY</span></code>, and <code class="docutils literal notranslate"><span class="pre">anthropic-version</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">gemini-*</span></code></p></td>
+<td><p>Gemini GenerateContent</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">aiplatform.googleapis.com</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">/v1/projects/$VERTEX_PROJECT/locations/$VERTEX_LOCATION/publishers/google/models/{model}:generateContent</span></code>,
+or <code class="docutils literal notranslate"><span class="pre">:streamGenerateContent?alt=sse</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">x-goog-api-key:</span> <span class="pre">$VERTEX_API_KEY</span></code></p></td>
+</tr>
+</tbody>
+</table></div>
+<p>A request whose model no route serves stays on <code class="docutils literal notranslate"><span class="pre">unknown_model</span></code>, and gets its <code class="docutils literal notranslate"><span class="pre">404</span></code>.</p>
+</section>
+<section id="transcoding">
+<h3>Transcoding<a class="headerlink" href="#transcoding" title="Link to this heading"></a></h3>
+<p>An AI Protocol Manager reads the APIs a route declares when the request headers reach it. <code class="docutils literal notranslate"><span class="pre">read_model</span></code> sees them
+before the route is picked on the model, so the transcoding is done by a second AI Protocol Manager, <code class="docutils literal notranslate"><span class="pre">transcode</span></code>,
+placed after <code class="docutils literal notranslate"><span class="pre">set_filter_state</span></code>: it sees the model’s route. It holds the request until its body is parsed, then
+runs its AI filters over it:</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="linenos">144</span><span class="w">          </span><span class="c1"># Transcodes via the canonical form, OpenAI Chat Completions: the first transcoder converts</span>
+<span class="linenos">145</span><span class="w">          </span><span class="c1"># the route's request API, the second its response API.</span>
+<span class="linenos">146</span><span class="w">          </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">transcode</span>
+<span class="linenos">147</span><span class="w">            </span><span class="nt">typed_config</span><span class="p">:</span>
+<span class="linenos">148</span><span class="w">              </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.filters.http.ai_protocol_manager.v3.AiProtocolManager</span>
+<span class="linenos">149</span><span class="w">              </span><span class="nt">request_handling</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{}</span>
+<span class="linenos">150</span><span class="w">              </span><span class="nt">filters</span><span class="p">:</span>
+<span class="linenos">151</span><span class="w">              </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">envoy.http.ai_filters.transcoder</span>
+<span class="linenos">152</span><span class="w">                </span><span class="nt">typed_config</span><span class="p">:</span>
+<span class="linenos">153</span><span class="w">                  </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.http.ai_filters.transcoder.v3.Transcoder</span>
+<span class="linenos">154</span><span class="w">                  </span><span class="nt">request_handling</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">TO_IR</span>
+<span class="linenos">155</span><span class="w">                  </span><span class="nt">response_handling</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">FROM_IR</span>
+<span class="linenos">156</span><span class="w">              </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">envoy.http.ai_filters.transcoder</span>
+<span class="linenos">157</span><span class="w">                </span><span class="nt">typed_config</span><span class="p">:</span>
+<span class="linenos">158</span><span class="w">                  </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.http.ai_filters.transcoder.v3.Transcoder</span>
+<span class="linenos">159</span><span class="w">                  </span><span class="nt">request_handling</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">FROM_IR</span>
+<span class="linenos">160</span><span class="w">                  </span><span class="nt">response_handling</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">TO_IR</span>
+</pre></div>
+</div>
+<p>Every API is translated through one canonical form, OpenAI Chat Completions. The first transcoder converts the
+client’s request into it, from the route’s request API, and the second converts it into the route’s response API,
+the provider’s. Responses take the reverse path, one JSON body or one streamed event at a time.</p>
+<p>As the client already speaks OpenAI Chat Completions, the first transcoder leaves its requests as they are. It is where
+a client of another API would be converted, on a route declaring that API as its request API.</p>
+<p>Gemini carries the model, and whether to stream, in the request path rather than the body. The transcoder moves both
+into the Gemini API’s path, <code class="docutils literal notranslate"><span class="pre">/v1beta/models/{model}:generateContent</span></code> or <code class="docutils literal notranslate"><span class="pre">:streamGenerateContent?alt=sse</span></code>, which the
+Vertex AI route then maps onto Vertex AI’s:</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="linenos">88</span><span class="w">                </span><span class="nt">route</span><span class="p">:</span>
+<span class="linenos">89</span><span class="w">                  </span><span class="nt">cluster</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dynamic_forward_proxy_cluster</span>
+<span class="linenos">90</span><span class="w">                  </span><span class="nt">timeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">120s</span>
+<span class="linenos">91</span><span class="w">                  </span><span class="c1"># The transcoder has set the Gemini API path, /v1beta/models/{model}:generateContent</span>
+<span class="linenos">92</span><span class="w">                  </span><span class="c1"># or :streamGenerateContent?alt=sse; this maps it onto Vertex AI's. The proxy fills</span>
+<span class="linenos">93</span><span class="w">                  </span><span class="c1"># in VERTEX_PROJECT and VERTEX_LOCATION from its environment when it starts.</span>
+<span class="linenos">94</span><span class="w">                  </span><span class="nt">regex_rewrite</span><span class="p">:</span>
+<span class="linenos">95</span><span class="w">                    </span><span class="nt">pattern</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">regex</span><span class="p">:</span><span class="w"> </span><span class="s">'^/v1beta/models/(.*)$'</span><span class="p p-Indicator">}</span>
+<span class="linenos">96</span><span class="w">                    </span><span class="nt">substitution</span><span class="p">:</span><span class="w"> </span><span class="s">'/v1/projects/VERTEX_PROJECT/locations/VERTEX_LOCATION/publishers/google/models/\1'</span>
+</pre></div>
+</div>
+<p>A route’s path rewrite cannot read the environment, so the proxy fills in <code class="docutils literal notranslate"><span class="pre">VERTEX_PROJECT</span></code> and <code class="docutils literal notranslate"><span class="pre">VERTEX_LOCATION</span></code>
+as it starts, from the <a class="reference download internal" href="https://github.com/envoyproxy/examples/blob/fbdcae6f549a6e20ed071596f76019e5b0786b8f/ai-transcoder/docker-compose.yaml"><code class="xref download docutils literal notranslate"><span class="pre">docker-compose.yaml</span></code></a> composition:</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="linenos">10</span><span class="w">    </span><span class="c1"># A route's path rewrite cannot read the environment, so the Google Cloud project and location of</span>
+<span class="linenos">11</span><span class="w">    </span><span class="c1"># the Vertex AI path are filled in as the proxy starts.</span>
+<span class="linenos">12</span><span class="w">    </span><span class="nt">command</span><span class="p">:</span>
+<span class="linenos">13</span><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/bin/sh</span>
+<span class="linenos">14</span><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">-c</span>
+<span class="linenos">15</span><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">&gt;-</span>
+<span class="linenos">16</span><span class="w">      </span><span class="no">sed "s|/projects/VERTEX_PROJECT/locations/VERTEX_LOCATION/|/projects/${VERTEX_PROJECT:-}/locations/${VERTEX_LOCATION:-global}/|"</span>
+<span class="linenos">17</span><span class="w">      </span><span class="no">/etc/envoy.yaml &gt; /tmp/envoy.yaml</span>
+<span class="linenos">18</span><span class="w">      </span><span class="no">&amp;&amp; exec /usr/local/bin/envoy -c /tmp/envoy.yaml</span>
+</pre></div>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>A Vertex AI express mode API key belongs to no project. To use one, change the substitution to
+<code class="docutils literal notranslate"><span class="pre">/v1/publishers/google/models/\1</span></code>.</p>
+</div>
+<p>The AI Protocol Manager cannot read a compressed response, so the routes remove the client’s <code class="docutils literal notranslate"><span class="pre">accept-encoding</span></code>
+header.</p>
+</section>
+<section id="one-cluster-for-every-provider">
+<h3>One cluster for every provider<a class="headerlink" href="#one-cluster-for-every-provider" title="Link to this heading"></a></h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">dynamic_forward_proxy</span></code> HTTP filter looks up the host that the route names, and the requests of every route go
+to the same <a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/http/http_proxy#arch-overview-http-dynamic-forward-proxy" title="(in envoy v1.40.0-dev-1d950c)"><span class="xref std std-ref">dynamic forward proxy</span></a> cluster, which connects to it:</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="linenos">171</span><span class="w">  </span><span class="nt">clusters</span><span class="p">:</span>
+<span class="linenos">172</span><span class="w">  </span><span class="c1"># One cluster for every provider. It connects to the host the route's dynamic forward proxy</span>
+<span class="linenos">173</span><span class="w">  </span><span class="c1"># config names, with that host as the TLS SNI and the name to validate the certificate against.</span>
+<span class="linenos">174</span><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dynamic_forward_proxy_cluster</span>
+<span class="linenos">175</span><span class="w">    </span><span class="nt">lb_policy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CLUSTER_PROVIDED</span>
+<span class="linenos">176</span><span class="w">    </span><span class="nt">cluster_type</span><span class="p">:</span>
+<span class="linenos">177</span><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">envoy.clusters.dynamic_forward_proxy</span>
+<span class="linenos">178</span><span class="w">      </span><span class="nt">typed_config</span><span class="p">:</span>
+<span class="linenos">179</span><span class="w">        </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.clusters.dynamic_forward_proxy.v3.ClusterConfig</span>
+<span class="linenos">180</span><span class="w">        </span><span class="nt">dns_cache_config</span><span class="p">:</span>
+<span class="linenos">181</span><span class="w">          </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dynamic_forward_proxy_cache_config</span>
+<span class="linenos">182</span><span class="w">          </span><span class="nt">dns_lookup_family</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">V4_ONLY</span>
+<span class="linenos">183</span><span class="w">    </span><span class="nt">transport_socket</span><span class="p">:</span>
+<span class="linenos">184</span><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">envoy.transport_sockets.tls</span>
+<span class="linenos">185</span><span class="w">      </span><span class="nt">typed_config</span><span class="p">:</span>
+<span class="linenos">186</span><span class="w">        </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext</span>
+<span class="linenos">187</span><span class="w">        </span><span class="nt">common_tls_context</span><span class="p">:</span>
+<span class="linenos">188</span><span class="w">          </span><span class="nt">validation_context</span><span class="p">:</span>
+<span class="linenos">189</span><span class="w">            </span><span class="nt">trusted_ca</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">filename</span><span class="p">:</span><span class="w"> </span><span class="nv">/etc/ssl/certs/ca-certificates.crt</span><span class="p p-Indicator">}</span>
+</pre></div>
+</div>
+<p>The cluster uses TLS, with the host as the SNI and as the name the provider’s certificate is validated against. Adding
+a provider takes a route, not a cluster.</p>
+</section>
+<section id="limitations">
+<h3>Limitations<a class="headerlink" href="#limitations" title="Link to this heading"></a></h3>
+<ul class="simple">
+<li><p>An error response, such as the <code class="docutils literal notranslate"><span class="pre">401</span></code> of a provider whose key is not set, is forwarded in the provider’s own
+format: the transcoder only converts successful responses.</p></li>
+<li><p>Not every field has a mapping yet: tool calls are not transcoded for Anthropic and Gemini.</p></li>
+<li><p>Each request is parsed twice, once by each AI Protocol Manager.</p></li>
+</ul>
+<div class="admonition seealso">
+<p class="admonition-title">See also</p>
+<dl class="simple">
+<dt><a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/ai_protocol_manager_filter#config-http-filters-ai-protocol-manager" title="(in envoy v1.40.0-dev-1d950c)"><span class="xref std std-ref">AI Protocol Manager</span></a></dt><dd><p>Learn more about the AI Protocol Manager filter and its AI filters.</p>
+</dd>
+<dt><a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/api-v3/extensions/http/ai_filters/transcoder/v3/transcoder.proto#envoy-v3-api-msg-extensions-http-ai-filters-transcoder-v3-transcoder" title="(in envoy v1.40.0-dev-1d950c)"><span class="xref std std-ref">Transcoder API</span></a></dt><dd><p>The transcoder AI filter’s configuration.</p>
+</dd>
+<dt><a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/configuration/advanced/well_known_filter_state#well-known-filter-state" title="(in envoy v1.40.0-dev-1d950c)"><span class="xref std std-ref">Well known filter state</span></a></dt><dd><p>Learn more about the <code class="docutils literal notranslate"><span class="pre">envoy.ai.model.request</span></code> filter state object.</p>
+</dd>
+<dt><a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/set_filter_state#config-http-filters-set-filter-state" title="(in envoy v1.40.0-dev-1d950c)"><span class="xref std std-ref">Set filter state</span></a></dt><dd><p>Learn more about the set filter state filter.</p>
+</dd>
+<dt><a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/http/http_proxy#arch-overview-http-dynamic-forward-proxy" title="(in envoy v1.40.0-dev-1d950c)"><span class="xref std std-ref">Dynamic forward proxy</span></a></dt><dd><p>Learn more about Envoy’s dynamic forward proxy.</p>
+</dd>
+</dl>
+</div>
+</section>
+</section>
+</section>
+  </article>
+  <p class="source">Built from <a href="https://github.com/envoyproxy/examples/tree/fbdcae6f549a6e20ed071596f76019e5b0786b8f/ai-transcoder">envoyproxy/examples/ai-transcoder at fbdcae6</a>.
+    Links into the Envoy docs go to envoyproxy.io/docs/envoy/latest.</p>
+</div>
+<script>
+document.querySelectorAll(".highlight").forEach((block) => {
+  const pre = block.querySelector("pre");
+  if (!pre) return;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "copy";
+  button.textContent = "Copy";
+  button.addEventListener("click", () => {
+    const clone = pre.cloneNode(true);
+    clone.querySelectorAll(".linenos").forEach((n) => n.remove());
+    const text = clone.textContent.replace(/\n$/, "");
+    const done = () => { button.textContent = "Copied"; setTimeout(() => (button.textContent = "Copy"), 1500); };
+    const select = () => {
+      const range = document.createRange();
+      range.selectNodeContents(pre);
+      const selection = getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      button.textContent = "Selected";
+    };
+    try { navigator.clipboard.writeText(text).then(done, select); } catch (e) { select(); }
+  });
+  block.appendChild(button);
+});
+</script>
+</body>
+</html>
