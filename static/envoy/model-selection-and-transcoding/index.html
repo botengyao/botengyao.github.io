@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<meta name="description" content="Preview of the Envoy sandbox page merged in envoyproxy/examples#1470: one OpenAI endpoint, routed by model to OpenAI, Anthropic and Vertex AI.">
+<meta name="description" content="Preview of the Envoy sandbox page as changed in envoyproxy/examples#1477: one OpenAI endpoint, routed by model to OpenAI, Anthropic and Vertex AI, with provider keys added by credential injectors.">
 <title>Model selection and transcoding</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -184,23 +184,23 @@ img { max-width: 100%; }
 </head>
 <body>
 <div class="page">
-  <p class="preview"><strong>Docs preview</strong><span>The Envoy sandbox page merged in
-    <a href="https://github.com/envoyproxy/examples/pull/1470">envoyproxy/examples#1470</a>, built from <code>fbdcae6</code>.
-    It goes live on envoyproxy.io once the next examples release is pinned in Envoy's docs.</span></p>
+  <p class="preview"><strong>Docs preview</strong><span>The Envoy sandbox page with the changes proposed in
+    <a href="https://github.com/envoyproxy/examples/pull/1477">envoyproxy/examples#1477</a>, built from <code>24cab85</code>.
+    It goes live on envoyproxy.io once the change merges and the next examples release is pinned in Envoy's docs.</span></p>
   <article>
 <section id="model-selection-and-transcoding">
 <span id="install-sandboxes-ai-transcoder"></span><h1>Model selection and transcoding<a class="headerlink" href="#model-selection-and-transcoding" title="Link to this heading"></a></h1>
 <aside class="sidebar">
 <p class="sidebar-title">Requirements</p>
 <dl class="simple">
-<dt><a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/start/sandboxes/setup#start-sandboxes-setup" title="(in envoy v1.40.0-dev-1d950c)"><span class="xref std std-ref">Sandbox environment</span></a></dt><dd><p>Setup your sandbox environment with Docker and Docker Compose,
+<dt><a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/start/sandboxes/setup#start-sandboxes-setup" title="(in envoy v1.40.0-dev-c66182)"><span class="xref std std-ref">Sandbox environment</span></a></dt><dd><p>Setup your sandbox environment with Docker and Docker Compose,
 and clone the Envoy repository with Git.</p>
 </dd>
 </dl>
 <dl class="simple">
-<dt><a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/start/sandboxes/setup#start-sandboxes-setup-curl" title="(in envoy v1.40.0-dev-1d950c)"><span class="xref std std-ref">curl</span></a></dt><dd><p>Used to make HTTP requests.</p>
+<dt><a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/start/sandboxes/setup#start-sandboxes-setup-curl" title="(in envoy v1.40.0-dev-c66182)"><span class="xref std std-ref">curl</span></a></dt><dd><p>Used to make HTTP requests.</p>
 </dd>
-<dt><a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/start/sandboxes/setup#start-sandboxes-setup-jq" title="(in envoy v1.40.0-dev-1d950c)"><span class="xref std std-ref">jq</span></a></dt><dd><p>Parse JSON output from the proxy.</p>
+<dt><a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/start/sandboxes/setup#start-sandboxes-setup-jq" title="(in envoy v1.40.0-dev-c66182)"><span class="xref std std-ref">jq</span></a></dt><dd><p>Parse JSON output from the proxy.</p>
 </dd>
 <dt>API keys</dt><dd><p>For each provider you want to try: <a class="reference external" href="https://platform.openai.com/api-keys">OpenAI</a>,
 <a class="reference external" href="https://console.anthropic.com/settings/keys">Anthropic</a> and
@@ -333,15 +333,16 @@ and Envoy sends each request to OpenAI, Anthropic or Gemini on Vertex AI in that
 </svg></figure>
 <p>For each request, Envoy:</p>
 <ul class="simple">
-<li><p>reads the request’s <code class="docutils literal notranslate"><span class="pre">model</span></code> with the <a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/ai_protocol_manager_filter#config-http-filters-ai-protocol-manager" title="(in envoy v1.40.0-dev-1d950c)"><span class="xref std std-ref">AI Protocol Manager</span></a>,
+<li><p>reads the request’s <code class="docutils literal notranslate"><span class="pre">model</span></code> with the <a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/ai_protocol_manager_filter#config-http-filters-ai-protocol-manager" title="(in envoy v1.40.0-dev-c66182)"><span class="xref std std-ref">AI Protocol Manager</span></a>,
 whose request info AI filter stores it as the <code class="docutils literal notranslate"><span class="pre">envoy.ai.model.request</span></code>
-<a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/configuration/advanced/well_known_filter_state#well-known-filter-state" title="(in envoy v1.40.0-dev-1d950c)"><span class="xref std std-ref">filter state object</span></a>, and picks a route on it: <code class="docutils literal notranslate"><span class="pre">gpt-*</span></code> models go to OpenAI,
+<a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/configuration/advanced/well_known_filter_state#well-known-filter-state" title="(in envoy v1.40.0-dev-c66182)"><span class="xref std std-ref">filter state object</span></a>, and picks a route on it: <code class="docutils literal notranslate"><span class="pre">gpt-*</span></code> models go to OpenAI,
 <code class="docutils literal notranslate"><span class="pre">claude-*</span></code> models to Anthropic, and <code class="docutils literal notranslate"><span class="pre">gemini-*</span></code> models to Vertex AI. Any other model is answered by Envoy with
 a <code class="docutils literal notranslate"><span class="pre">404</span></code>.</p></li>
 <li><p>converts the request into the provider’s API, and the provider’s response (a JSON body or a stream of
 server-sent events) back into OpenAI’s, with the AI Protocol Manager’s transcoder AI filter.</p></li>
-<li><p>sends it through a single <a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/http/http_proxy#arch-overview-http-dynamic-forward-proxy" title="(in envoy v1.40.0-dev-1d950c)"><span class="xref std std-ref">dynamic forward proxy</span></a> cluster to the
-provider’s host, which the route names, adding the provider’s API key on the way.</p></li>
+<li><p>adds the provider’s API key, with a <a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/credential_injector_filter#config-http-filters-credential-injector" title="(in envoy v1.40.0-dev-c66182)"><span class="xref std std-ref">credential injector</span></a>, and
+sends it through a single <a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/http/http_proxy#arch-overview-http-dynamic-forward-proxy" title="(in envoy v1.40.0-dev-c66182)"><span class="xref std std-ref">dynamic forward proxy</span></a> cluster to the
+provider’s host, which the route names.</p></li>
 </ul>
 <div class="admonition warning">
 <p class="admonition-title">Warning</p>
@@ -364,8 +365,9 @@ default:</p>
 <span class="gp">$ </span><span class="nb">export</span><span class="w"> </span><span class="nv">VERTEX_LOCATION</span><span class="o">=</span>global
 </pre></div>
 </div>
-<p>The keys are passed to the Envoy container as environment variables, and Envoy adds them to the requests it sends to
-each provider: clients do not need them. A provider whose key is not set answers with its own authentication error.</p>
+<p>The keys are passed to the Envoy container as environment variables, which Envoy loads as secrets and adds to the
+requests it sends to each provider: clients do not need them. Envoy answers a request for a provider whose key is not
+set with a <code class="docutils literal notranslate"><span class="pre">401</span></code> itself, without sending it.</p>
 </section>
 <section id="step-2-start-the-sandbox">
 <h2>Step 2: Start the sandbox<a class="headerlink" href="#step-2-start-the-sandbox" title="Link to this heading"></a></h2>
@@ -379,7 +381,7 @@ each provider: clients do not need them. A provider whose key is not set answers
 </pre></div>
 </div>
 <p>Envoy listens for AI requests on port <code class="docutils literal notranslate"><span class="pre">10000</span></code>, and serves its admin interface on port <code class="docutils literal notranslate"><span class="pre">9901</span></code>.</p>
-<p>Alternatively, <a class="reference download internal" href="https://github.com/envoyproxy/examples/blob/fbdcae6f549a6e20ed071596f76019e5b0786b8f/ai-transcoder/run-sandbox.sh"><code class="xref download docutils literal notranslate"><span class="pre">run-sandbox.sh</span></code></a> does steps 1 and 2: it asks for each
+<p>Alternatively, <a class="reference download internal" href="https://github.com/botengyao/examples/blob/24cab85/ai-transcoder/run-sandbox.sh"><code class="xref download docutils literal notranslate"><span class="pre">run-sandbox.sh</span></code></a> does steps 1 and 2: it asks for each
 key, without echoing it, and for the Vertex AI project, then builds and starts the sandbox and follows Envoy’s log,
 which shows where each request went:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>./run-sandbox.sh
@@ -530,92 +532,88 @@ other parsed the five that a provider served, to transcode them.</p>
 <section id="routing-on-the-model">
 <h3>Routing on the model<a class="headerlink" href="#routing-on-the-model" title="Link to this heading"></a></h3>
 <p>The model is in the request body, but Envoy picks a route as soon as the request headers arrive, before the body is
-read. So every chat request starts on the last route, <code class="docutils literal notranslate"><span class="pre">unknown_model</span></code>. It declares the request’s API for the first
-AI Protocol Manager, <code class="docutils literal notranslate"><span class="pre">read_model</span></code>, which therefore parses the body:</p>
-<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="linenos">109</span><span class="w">              </span><span class="c1"># Every chat request starts on this route, as its model is only known once its body is</span>
-<span class="linenos">110</span><span class="w">              </span><span class="c1"># read. It stays here, and is answered locally, when no route above serves the model.</span>
-<span class="linenos">111</span><span class="w">              </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">unknown_model</span>
-<span class="linenos">112</span><span class="w">                </span><span class="nt">match</span><span class="p">:</span>
-<span class="linenos">113</span><span class="w">                  </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/v1/chat/completions</span>
-<span class="linenos">114</span><span class="w">                </span><span class="nt">direct_response</span><span class="p">:</span>
-<span class="linenos">115</span><span class="w">                  </span><span class="nt">status</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">404</span>
-<span class="linenos">116</span><span class="w">                  </span><span class="nt">body</span><span class="p">:</span>
-<span class="linenos">117</span><span class="w">                    </span><span class="nt">inline_string</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">&gt;-</span>
-<span class="linenos">118</span><span class="w">                      </span><span class="no">{"error": {"message": "No backend serves this model.", "type": "invalid_request_error",</span>
-<span class="linenos">119</span><span class="w">                      </span><span class="no">"param": "model", "code": "model_not_found"}}</span>
-<span class="linenos">120</span><span class="w">                </span><span class="nt">response_headers_to_add</span><span class="p">:</span>
-<span class="linenos">121</span><span class="w">                </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">header</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="nv">content-type</span><span class="p p-Indicator">,</span><span class="nt"> value</span><span class="p">:</span><span class="w"> </span><span class="nv">application/json</span><span class="p p-Indicator">}</span>
-<span class="linenos">122</span><span class="w">                  </span><span class="nt">append_action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OVERWRITE_IF_EXISTS_OR_ADD</span>
-<span class="hll"><span class="linenos">123</span><span class="w">                </span><span class="nt">typed_per_filter_config</span><span class="p">:</span>
-</span><span class="hll"><span class="linenos">124</span><span class="w">                  </span><span class="nt">read_model</span><span class="p">:</span>
-</span><span class="hll"><span class="linenos">125</span><span class="w">                    </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.filters.http.ai_protocol_manager.v3.AiProtocolManagerPerRoute</span>
-</span><span class="hll"><span class="linenos">126</span><span class="w">                    </span><span class="nt">request</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">llm_protocol</span><span class="p">:</span><span class="w"> </span><span class="nv">OPENAI_CHAT_COMPLETIONS</span><span class="p p-Indicator">}</span>
+read. So every request starts on the last route, <code class="docutils literal notranslate"><span class="pre">chat_completions</span></code>, the only one that names the endpoint’s path.
+It declares the request’s API for the first AI Protocol Manager, <code class="docutils literal notranslate"><span class="pre">read_model</span></code>, which therefore parses the body:</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="linenos"> 97</span><span class="w">              </span><span class="c1"># Every request starts on this route, as its model is only known once its body is read.</span>
+<span class="linenos"> 98</span><span class="w">              </span><span class="c1"># It stays here, and is answered locally, when no route above serves the model.</span>
+<span class="linenos"> 99</span><span class="w">              </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">chat_completions</span>
+<span class="linenos">100</span><span class="w">                </span><span class="nt">match</span><span class="p">:</span>
+<span class="hll"><span class="linenos">101</span><span class="w">                  </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/v1/chat/completions</span>
+</span><span class="linenos">102</span><span class="w">                </span><span class="nt">direct_response</span><span class="p">:</span>
+<span class="linenos">103</span><span class="w">                  </span><span class="nt">status</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">404</span>
+<span class="linenos">104</span><span class="w">                  </span><span class="nt">body</span><span class="p">:</span>
+<span class="linenos">105</span><span class="w">                    </span><span class="nt">inline_string</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">&gt;-</span>
+<span class="linenos">106</span><span class="w">                      </span><span class="no">{"error": {"message": "No backend serves this model.", "type": "invalid_request_error",</span>
+<span class="linenos">107</span><span class="w">                      </span><span class="no">"param": "model", "code": "model_not_found"}}</span>
+<span class="linenos">108</span><span class="w">                </span><span class="nt">response_headers_to_add</span><span class="p">:</span>
+<span class="linenos">109</span><span class="w">                </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">header</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="nv">content-type</span><span class="p p-Indicator">,</span><span class="nt"> value</span><span class="p">:</span><span class="w"> </span><span class="nv">application/json</span><span class="p p-Indicator">}</span>
+<span class="linenos">110</span><span class="w">                  </span><span class="nt">append_action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OVERWRITE_IF_EXISTS_OR_ADD</span>
+<span class="hll"><span class="linenos">111</span><span class="w">                </span><span class="nt">typed_per_filter_config</span><span class="p">:</span>
+</span><span class="hll"><span class="linenos">112</span><span class="w">                  </span><span class="nt">read_model</span><span class="p">:</span>
+</span><span class="hll"><span class="linenos">113</span><span class="w">                    </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.filters.http.ai_protocol_manager.v3.AiProtocolManagerPerRoute</span>
+</span><span class="hll"><span class="linenos">114</span><span class="w">                    </span><span class="nt">request</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">llm_protocol</span><span class="p">:</span><span class="w"> </span><span class="nv">OPENAI_CHAT_COMPLETIONS</span><span class="p p-Indicator">}</span>
 </span></pre></div>
 </div>
 <p><code class="docutils literal notranslate"><span class="pre">read_model</span></code> runs the request info AI filter, which stores the model as the <code class="docutils literal notranslate"><span class="pre">envoy.ai.model.request</span></code> filter state
 object. As that filter only reads the request, <code class="docutils literal notranslate"><span class="pre">read_model</span></code> forwards the body as it was received. The
 <code class="docutils literal notranslate"><span class="pre">set_filter_state</span></code> filter then clears the route cache, so that the route is picked again, now that the model is
 known:</p>
-<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="linenos">127</span><span class="w">          </span><span class="nt">http_filters</span><span class="p">:</span>
-<span class="linenos">128</span><span class="w">          </span><span class="c1"># Stores the request's model as the envoy.ai.model.request filter state object, and forwards</span>
-<span class="linenos">129</span><span class="w">          </span><span class="c1"># the body as received.</span>
-<span class="linenos">130</span><span class="w">          </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">read_model</span>
-<span class="linenos">131</span><span class="w">            </span><span class="nt">typed_config</span><span class="p">:</span>
-<span class="linenos">132</span><span class="w">              </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.filters.http.ai_protocol_manager.v3.AiProtocolManager</span>
-<span class="linenos">133</span><span class="w">              </span><span class="nt">request_handling</span><span class="p">:</span>
-<span class="linenos">134</span><span class="w">                </span><span class="nt">reserialize_body</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">DISABLE</span>
-<span class="linenos">135</span><span class="w">              </span><span class="nt">filters</span><span class="p">:</span>
-<span class="linenos">136</span><span class="w">              </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">envoy.http.ai_filters.request_info</span>
-<span class="linenos">137</span><span class="w">                </span><span class="nt">typed_config</span><span class="p">:</span>
-<span class="linenos">138</span><span class="w">                  </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.http.ai_filters.request_info.v3.RequestInfo</span>
-<span class="linenos">139</span><span class="w">          </span><span class="c1"># Picks the route again, on the model.</span>
-<span class="linenos">140</span><span class="w">          </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">envoy.filters.http.set_filter_state</span>
-<span class="linenos">141</span><span class="w">            </span><span class="nt">typed_config</span><span class="p">:</span>
-<span class="linenos">142</span><span class="w">              </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.filters.http.set_filter_state.v3.Config</span>
-<span class="linenos">143</span><span class="w">              </span><span class="nt">clear_route_cache</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="linenos">115</span><span class="w">          </span><span class="nt">http_filters</span><span class="p">:</span>
+<span class="linenos">116</span><span class="w">          </span><span class="c1"># Stores the request's model as the envoy.ai.model.request filter state object, and forwards</span>
+<span class="linenos">117</span><span class="w">          </span><span class="c1"># the body as received.</span>
+<span class="linenos">118</span><span class="w">          </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">read_model</span>
+<span class="linenos">119</span><span class="w">            </span><span class="nt">typed_config</span><span class="p">:</span>
+<span class="linenos">120</span><span class="w">              </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.filters.http.ai_protocol_manager.v3.AiProtocolManager</span>
+<span class="linenos">121</span><span class="w">              </span><span class="nt">request_handling</span><span class="p">:</span>
+<span class="linenos">122</span><span class="w">                </span><span class="nt">reserialize_body</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">DISABLE</span>
+<span class="linenos">123</span><span class="w">              </span><span class="nt">filters</span><span class="p">:</span>
+<span class="linenos">124</span><span class="w">              </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">envoy.http.ai_filters.request_info</span>
+<span class="linenos">125</span><span class="w">                </span><span class="nt">typed_config</span><span class="p">:</span>
+<span class="linenos">126</span><span class="w">                  </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.http.ai_filters.request_info.v3.RequestInfo</span>
+<span class="linenos">127</span><span class="w">          </span><span class="c1"># Picks the route again, on the model.</span>
+<span class="linenos">128</span><span class="w">          </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">envoy.filters.http.set_filter_state</span>
+<span class="linenos">129</span><span class="w">            </span><span class="nt">typed_config</span><span class="p">:</span>
+<span class="linenos">130</span><span class="w">              </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.filters.http.set_filter_state.v3.Config</span>
+<span class="linenos">131</span><span class="w">              </span><span class="nt">clear_route_cache</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 </pre></div>
 </div>
 <p>Each provider has a route that matches its models. Here is Anthropic’s, in the
-<a class="reference download internal" href="https://github.com/envoyproxy/examples/blob/fbdcae6f549a6e20ed071596f76019e5b0786b8f/ai-transcoder/envoy.yaml"><code class="xref download docutils literal notranslate"><span class="pre">envoy.yaml</span></code></a> configuration:</p>
-<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="linenos">56</span><span class="w">              </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">anthropic</span>
-<span class="linenos">57</span><span class="w">                </span><span class="nt">match</span><span class="p">:</span>
-<span class="linenos">58</span><span class="w">                  </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/v1/chat/completions</span>
-<span class="hll"><span class="linenos">59</span><span class="w">                  </span><span class="nt">filter_state</span><span class="p">:</span>
-</span><span class="hll"><span class="linenos">60</span><span class="w">                  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">envoy.ai.model.request</span>
-</span><span class="hll"><span class="linenos">61</span><span class="w">                    </span><span class="nt">string_match</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">prefix</span><span class="p">:</span><span class="w"> </span><span class="nv">claude-</span><span class="p p-Indicator">}</span>
-</span><span class="linenos">62</span><span class="w">                </span><span class="nt">route</span><span class="p">:</span>
-<span class="linenos">63</span><span class="w">                  </span><span class="nt">cluster</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dynamic_forward_proxy_cluster</span>
-<span class="linenos">64</span><span class="w">                  </span><span class="nt">timeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">120s</span>
-<span class="linenos">65</span><span class="w">                  </span><span class="nt">regex_rewrite</span><span class="p">:</span>
-<span class="linenos">66</span><span class="w">                    </span><span class="nt">pattern</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">regex</span><span class="p">:</span><span class="w"> </span><span class="s">'^/v1/chat/completions$'</span><span class="p p-Indicator">}</span>
-<span class="linenos">67</span><span class="w">                    </span><span class="nt">substitution</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/v1/messages</span>
-<span class="linenos">68</span><span class="w">                </span><span class="nt">request_headers_to_remove</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">authorization</span><span class="p p-Indicator">]</span>
-<span class="linenos">69</span><span class="w">                </span><span class="nt">request_headers_to_add</span><span class="p">:</span>
-<span class="linenos">70</span><span class="w">                </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">header</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="nv">x-api-key</span><span class="p p-Indicator">,</span><span class="nt"> value</span><span class="p">:</span><span class="w"> </span><span class="s">"%ENVIRONMENT(ANTHROPIC_API_KEY)%"</span><span class="p p-Indicator">}</span>
-<span class="linenos">71</span><span class="w">                  </span><span class="nt">append_action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OVERWRITE_IF_EXISTS_OR_ADD</span>
-<span class="linenos">72</span><span class="w">                </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">header</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="nv">anthropic-version</span><span class="p p-Indicator">,</span><span class="nt"> value</span><span class="p">:</span><span class="w"> </span><span class="s">"2023-06-01"</span><span class="p p-Indicator">}</span>
-<span class="linenos">73</span><span class="w">                  </span><span class="nt">append_action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OVERWRITE_IF_EXISTS_OR_ADD</span>
-<span class="hll"><span class="linenos">74</span><span class="w">                </span><span class="nt">typed_per_filter_config</span><span class="p">:</span>
-</span><span class="hll"><span class="linenos">75</span><span class="w">                  </span><span class="nt">transcode</span><span class="p">:</span>
-</span><span class="hll"><span class="linenos">76</span><span class="w">                    </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.filters.http.ai_protocol_manager.v3.AiProtocolManagerPerRoute</span>
-</span><span class="hll"><span class="linenos">77</span><span class="w">                    </span><span class="nt">request</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">llm_protocol</span><span class="p">:</span><span class="w"> </span><span class="nv">OPENAI_CHAT_COMPLETIONS</span><span class="p p-Indicator">}</span>
-</span><span class="hll"><span class="linenos">78</span><span class="w">                    </span><span class="nt">response</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">llm_protocol</span><span class="p">:</span><span class="w"> </span><span class="nv">ANTHROPIC_MESSAGES</span><span class="p p-Indicator">}</span>
-</span><span class="linenos">79</span><span class="w">                  </span><span class="nt">envoy.filters.http.dynamic_forward_proxy</span><span class="p">:</span>
-<span class="linenos">80</span><span class="w">                    </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.filters.http.dynamic_forward_proxy.v3.PerRouteConfig</span>
-<span class="linenos">81</span><span class="w">                    </span><span class="nt">host_rewrite_literal</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">api.anthropic.com</span>
-</pre></div>
+<a class="reference download internal" href="https://github.com/botengyao/examples/blob/24cab85/ai-transcoder/envoy.yaml"><code class="xref download docutils literal notranslate"><span class="pre">envoy.yaml</span></code></a> configuration:</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="linenos">55</span><span class="w">              </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">anthropic</span>
+<span class="linenos">56</span><span class="w">                </span><span class="nt">match</span><span class="p">:</span>
+<span class="hll"><span class="linenos">57</span><span class="w">                  </span><span class="nt">prefix</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/</span>
+</span><span class="hll"><span class="linenos">58</span><span class="w">                  </span><span class="nt">filter_state</span><span class="p">:</span>
+</span><span class="hll"><span class="linenos">59</span><span class="w">                  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">envoy.ai.model.request</span>
+</span><span class="hll"><span class="linenos">60</span><span class="w">                    </span><span class="nt">string_match</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">prefix</span><span class="p">:</span><span class="w"> </span><span class="nv">claude-</span><span class="p p-Indicator">}</span>
+</span><span class="linenos">61</span><span class="w">                </span><span class="nt">route</span><span class="p">:</span>
+<span class="linenos">62</span><span class="w">                  </span><span class="nt">cluster</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dynamic_forward_proxy_cluster</span>
+<span class="hll"><span class="linenos">63</span><span class="w">                  </span><span class="nt">host_rewrite_literal</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">api.anthropic.com</span>
+</span><span class="hll"><span class="linenos">64</span><span class="w">                  </span><span class="nt">path_rewrite</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/v1/messages</span>
+</span><span class="linenos">65</span><span class="w">                  </span><span class="nt">timeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">120s</span>
+<span class="linenos">66</span><span class="w">                </span><span class="nt">request_headers_to_add</span><span class="p">:</span>
+<span class="linenos">67</span><span class="w">                </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">header</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="nv">anthropic-version</span><span class="p p-Indicator">,</span><span class="nt"> value</span><span class="p">:</span><span class="w"> </span><span class="s">"2023-06-01"</span><span class="p p-Indicator">}</span>
+<span class="linenos">68</span><span class="w">                  </span><span class="nt">append_action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OVERWRITE_IF_EXISTS_OR_ADD</span>
+<span class="hll"><span class="linenos">69</span><span class="w">                </span><span class="nt">typed_per_filter_config</span><span class="p">:</span>
+</span><span class="hll"><span class="linenos">70</span><span class="w">                  </span><span class="nt">transcode</span><span class="p">:</span>
+</span><span class="hll"><span class="linenos">71</span><span class="w">                    </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.filters.http.ai_protocol_manager.v3.AiProtocolManagerPerRoute</span>
+</span><span class="hll"><span class="linenos">72</span><span class="w">                    </span><span class="nt">request</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">llm_protocol</span><span class="p">:</span><span class="w"> </span><span class="nv">OPENAI_CHAT_COMPLETIONS</span><span class="p p-Indicator">}</span>
+</span><span class="hll"><span class="linenos">73</span><span class="w">                    </span><span class="nt">response</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">llm_protocol</span><span class="p">:</span><span class="w"> </span><span class="nv">ANTHROPIC_MESSAGES</span><span class="p p-Indicator">}</span>
+</span><span class="hll"><span class="linenos">74</span><span class="w">                  </span><span class="nt">anthropic_key</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="nv">type.googleapis.com/envoy.config.route.v3.FilterConfig</span><span class="p p-Indicator">,</span><span class="nt"> config</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{}}</span>
+</span></pre></div>
 </div>
 <p>The route:</p>
 <ul class="simple">
-<li><p>matches a model starting with <code class="docutils literal notranslate"><span class="pre">claude-</span></code>, with a <a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/api-v3/config/route/v3/route_components.proto#envoy-v3-api-field-config-route-v3-routematch-filter-state" title="(in envoy v1.40.0-dev-1d950c)"><span class="xref std std-ref">filter state</span></a>
-matcher on <code class="docutils literal notranslate"><span class="pre">envoy.ai.model.request</span></code>.</p></li>
+<li><p>matches a model starting with <code class="docutils literal notranslate"><span class="pre">claude-</span></code>, with a <a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/api-v3/config/route/v3/route_components.proto#envoy-v3-api-field-config-route-v3-routematch-filter-state" title="(in envoy v1.40.0-dev-c66182)"><span class="xref std std-ref">filter state</span></a>
+matcher on <code class="docutils literal notranslate"><span class="pre">envoy.ai.model.request</span></code>. It needs no path of its own: only a request that <code class="docutils literal notranslate"><span class="pre">read_model</span></code> parsed has
+a model, and <code class="docutils literal notranslate"><span class="pre">read_model</span></code> parses only the requests of <code class="docutils literal notranslate"><span class="pre">chat_completions</span></code>.</p></li>
 <li><p>declares the APIs to transcode between, with the AI Protocol Manager’s
-<a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/api-v3/extensions/filters/http/ai_protocol_manager/v3/ai_protocol_manager.proto#envoy-v3-api-msg-extensions-filters-http-ai-protocol-manager-v3-aiprotocolmanagerperroute" title="(in envoy v1.40.0-dev-1d950c)"><span class="xref std std-ref">per-route configuration</span></a>
+<a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/api-v3/extensions/filters/http/ai_protocol_manager/v3/ai_protocol_manager.proto#envoy-v3-api-msg-extensions-filters-http-ai-protocol-manager-v3-aiprotocolmanagerperroute" title="(in envoy v1.40.0-dev-c66182)"><span class="xref std std-ref">per-route configuration</span></a>
 for the second AI Protocol Manager, <code class="docutils literal notranslate"><span class="pre">transcode</span></code>: the client’s request API is OpenAI Chat Completions, and the
 provider’s API is Anthropic Messages.</p></li>
-<li><p>names the provider’s host for the dynamic forward proxy, with <code class="docutils literal notranslate"><span class="pre">host_rewrite_literal</span></code>.</p></li>
-<li><p>rewrites the path to Anthropic’s, removes the client’s <code class="docutils literal notranslate"><span class="pre">authorization</span></code> header, and adds Anthropic’s key header,
-whose value Envoy reads from the <code class="docutils literal notranslate"><span class="pre">ANTHROPIC_API_KEY</span></code> environment variable.</p></li>
+<li><p>names the provider’s host, with <code class="docutils literal notranslate"><span class="pre">host_rewrite_literal</span></code>, and replaces the path with Anthropic’s, with
+<a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/api-v3/config/route/v3/route_components.proto#envoy-v3-api-field-config-route-v3-routeaction-path-rewrite" title="(in envoy v1.40.0-dev-c66182)"><span class="xref std std-ref">path_rewrite</span></a>.</p></li>
+<li><p>enables <code class="docutils literal notranslate"><span class="pre">anthropic_key</span></code>, the credential injector that adds Anthropic’s key, and adds the <code class="docutils literal notranslate"><span class="pre">anthropic-version</span></code>
+header that Anthropic requires.</p></li>
 </ul>
 <p>The routes only differ in these settings:</p>
 <div class="table-wrap"><table class="docutils align-default">
@@ -649,7 +647,7 @@ or <code class="docutils literal notranslate"><span class="pre">:streamGenerateC
 </tr>
 </tbody>
 </table></div>
-<p>A request whose model no route serves stays on <code class="docutils literal notranslate"><span class="pre">unknown_model</span></code>, and gets its <code class="docutils literal notranslate"><span class="pre">404</span></code>.</p>
+<p>A request whose model no route serves stays on <code class="docutils literal notranslate"><span class="pre">chat_completions</span></code>, and gets its <code class="docutils literal notranslate"><span class="pre">404</span></code>.</p>
 </section>
 <section id="transcoding">
 <h3>Transcoding<a class="headerlink" href="#transcoding" title="Link to this heading"></a></h3>
@@ -657,23 +655,23 @@ or <code class="docutils literal notranslate"><span class="pre">:streamGenerateC
 before the route is picked on the model, so the transcoding is done by a second AI Protocol Manager, <code class="docutils literal notranslate"><span class="pre">transcode</span></code>,
 placed after <code class="docutils literal notranslate"><span class="pre">set_filter_state</span></code>: it sees the model’s route. It holds the request until its body is parsed, then
 runs its AI filters over it:</p>
-<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="linenos">144</span><span class="w">          </span><span class="c1"># Transcodes via the canonical form, OpenAI Chat Completions: the first transcoder converts</span>
-<span class="linenos">145</span><span class="w">          </span><span class="c1"># the route's request API, the second its response API.</span>
-<span class="linenos">146</span><span class="w">          </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">transcode</span>
-<span class="linenos">147</span><span class="w">            </span><span class="nt">typed_config</span><span class="p">:</span>
-<span class="linenos">148</span><span class="w">              </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.filters.http.ai_protocol_manager.v3.AiProtocolManager</span>
-<span class="linenos">149</span><span class="w">              </span><span class="nt">request_handling</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{}</span>
-<span class="linenos">150</span><span class="w">              </span><span class="nt">filters</span><span class="p">:</span>
-<span class="linenos">151</span><span class="w">              </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">envoy.http.ai_filters.transcoder</span>
-<span class="linenos">152</span><span class="w">                </span><span class="nt">typed_config</span><span class="p">:</span>
-<span class="linenos">153</span><span class="w">                  </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.http.ai_filters.transcoder.v3.Transcoder</span>
-<span class="linenos">154</span><span class="w">                  </span><span class="nt">request_handling</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">TO_IR</span>
-<span class="linenos">155</span><span class="w">                  </span><span class="nt">response_handling</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">FROM_IR</span>
-<span class="linenos">156</span><span class="w">              </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">envoy.http.ai_filters.transcoder</span>
-<span class="linenos">157</span><span class="w">                </span><span class="nt">typed_config</span><span class="p">:</span>
-<span class="linenos">158</span><span class="w">                  </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.http.ai_filters.transcoder.v3.Transcoder</span>
-<span class="linenos">159</span><span class="w">                  </span><span class="nt">request_handling</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">FROM_IR</span>
-<span class="linenos">160</span><span class="w">                  </span><span class="nt">response_handling</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">TO_IR</span>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="linenos">132</span><span class="w">          </span><span class="c1"># Transcodes via the canonical form, OpenAI Chat Completions: the first transcoder converts</span>
+<span class="linenos">133</span><span class="w">          </span><span class="c1"># the route's request API, the second its response API.</span>
+<span class="linenos">134</span><span class="w">          </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">transcode</span>
+<span class="linenos">135</span><span class="w">            </span><span class="nt">typed_config</span><span class="p">:</span>
+<span class="linenos">136</span><span class="w">              </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.filters.http.ai_protocol_manager.v3.AiProtocolManager</span>
+<span class="linenos">137</span><span class="w">              </span><span class="nt">request_handling</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{}</span>
+<span class="linenos">138</span><span class="w">              </span><span class="nt">filters</span><span class="p">:</span>
+<span class="linenos">139</span><span class="w">              </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">envoy.http.ai_filters.transcoder</span>
+<span class="linenos">140</span><span class="w">                </span><span class="nt">typed_config</span><span class="p">:</span>
+<span class="linenos">141</span><span class="w">                  </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.http.ai_filters.transcoder.v3.Transcoder</span>
+<span class="linenos">142</span><span class="w">                  </span><span class="nt">request_handling</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">TO_IR</span>
+<span class="linenos">143</span><span class="w">                  </span><span class="nt">response_handling</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">FROM_IR</span>
+<span class="linenos">144</span><span class="w">              </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">envoy.http.ai_filters.transcoder</span>
+<span class="linenos">145</span><span class="w">                </span><span class="nt">typed_config</span><span class="p">:</span>
+<span class="linenos">146</span><span class="w">                  </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.http.ai_filters.transcoder.v3.Transcoder</span>
+<span class="linenos">147</span><span class="w">                  </span><span class="nt">request_handling</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">FROM_IR</span>
+<span class="linenos">148</span><span class="w">                  </span><span class="nt">response_handling</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">TO_IR</span>
 </pre></div>
 </div>
 <p>Every API is translated through one canonical form, OpenAI Chat Completions. The first transcoder converts the
@@ -684,21 +682,23 @@ a client of another API would be converted, on a route declaring that API as its
 <p>Gemini carries the model, and whether to stream, in the request path rather than the body. The transcoder moves both
 into the Gemini API’s path, <code class="docutils literal notranslate"><span class="pre">/v1beta/models/{model}:generateContent</span></code> or <code class="docutils literal notranslate"><span class="pre">:streamGenerateContent?alt=sse</span></code>, which the
 Vertex AI route then maps onto Vertex AI’s:</p>
-<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="linenos">88</span><span class="w">                </span><span class="nt">route</span><span class="p">:</span>
-<span class="linenos">89</span><span class="w">                  </span><span class="nt">cluster</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dynamic_forward_proxy_cluster</span>
-<span class="linenos">90</span><span class="w">                  </span><span class="nt">timeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">120s</span>
-<span class="linenos">91</span><span class="w">                  </span><span class="c1"># The transcoder has set the Gemini API path, /v1beta/models/{model}:generateContent</span>
-<span class="linenos">92</span><span class="w">                  </span><span class="c1"># or :streamGenerateContent?alt=sse; this maps it onto Vertex AI's. The proxy fills</span>
-<span class="linenos">93</span><span class="w">                  </span><span class="c1"># in VERTEX_PROJECT and VERTEX_LOCATION from its environment when it starts.</span>
-<span class="linenos">94</span><span class="w">                  </span><span class="nt">regex_rewrite</span><span class="p">:</span>
-<span class="linenos">95</span><span class="w">                    </span><span class="nt">pattern</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">regex</span><span class="p">:</span><span class="w"> </span><span class="s">'^/v1beta/models/(.*)$'</span><span class="p p-Indicator">}</span>
-<span class="linenos">96</span><span class="w">                    </span><span class="nt">substitution</span><span class="p">:</span><span class="w"> </span><span class="s">'/v1/projects/VERTEX_PROJECT/locations/VERTEX_LOCATION/publishers/google/models/\1'</span>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="linenos">81</span><span class="w">                </span><span class="nt">route</span><span class="p">:</span>
+<span class="linenos">82</span><span class="w">                  </span><span class="nt">cluster</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dynamic_forward_proxy_cluster</span>
+<span class="linenos">83</span><span class="w">                  </span><span class="nt">host_rewrite_literal</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">aiplatform.googleapis.com</span>
+<span class="linenos">84</span><span class="w">                  </span><span class="nt">timeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">120s</span>
+<span class="linenos">85</span><span class="w">                  </span><span class="c1"># The transcoder has set the Gemini API path, /v1beta/models/{model}:generateContent</span>
+<span class="linenos">86</span><span class="w">                  </span><span class="c1"># or :streamGenerateContent?alt=sse; this nests the model under Vertex AI's project and</span>
+<span class="linenos">87</span><span class="w">                  </span><span class="c1"># location, which the proxy fills in from its environment when it starts.</span>
+<span class="linenos">88</span><span class="w">                  </span><span class="nt">regex_rewrite</span><span class="p">:</span>
+<span class="linenos">89</span><span class="w">                    </span><span class="nt">pattern</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">regex</span><span class="p">:</span><span class="w"> </span><span class="nv">^/v1beta/</span><span class="p p-Indicator">}</span>
+<span class="linenos">90</span><span class="w">                    </span><span class="nt">substitution</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/v1/projects/VERTEX_PROJECT/locations/VERTEX_LOCATION/publishers/google/</span>
 </pre></div>
 </div>
-<p>A route’s path rewrite cannot read the environment, so the proxy fills in <code class="docutils literal notranslate"><span class="pre">VERTEX_PROJECT</span></code> and <code class="docutils literal notranslate"><span class="pre">VERTEX_LOCATION</span></code>
-as it starts, from the <a class="reference download internal" href="https://github.com/envoyproxy/examples/blob/fbdcae6f549a6e20ed071596f76019e5b0786b8f/ai-transcoder/docker-compose.yaml"><code class="xref download docutils literal notranslate"><span class="pre">docker-compose.yaml</span></code></a> composition:</p>
-<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="linenos">10</span><span class="w">    </span><span class="c1"># A route's path rewrite cannot read the environment, so the Google Cloud project and location of</span>
-<span class="linenos">11</span><span class="w">    </span><span class="c1"># the Vertex AI path are filled in as the proxy starts.</span>
+<p>The regex rewrite keeps the model and the method from the path, but cannot read the environment, so the proxy fills in
+<code class="docutils literal notranslate"><span class="pre">VERTEX_PROJECT</span></code> and <code class="docutils literal notranslate"><span class="pre">VERTEX_LOCATION</span></code> as it starts, from the
+<a class="reference download internal" href="https://github.com/botengyao/examples/blob/24cab85/ai-transcoder/docker-compose.yaml"><code class="xref download docutils literal notranslate"><span class="pre">docker-compose.yaml</span></code></a> composition:</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="linenos">10</span><span class="w">    </span><span class="c1"># The Vertex AI path is rewritten with a regex, which cannot read the environment, so the Google</span>
+<span class="linenos">11</span><span class="w">    </span><span class="c1"># Cloud project and location in it are filled in as the proxy starts.</span>
 <span class="linenos">12</span><span class="w">    </span><span class="nt">command</span><span class="p">:</span>
 <span class="linenos">13</span><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/bin/sh</span>
 <span class="linenos">14</span><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">-c</span>
@@ -711,59 +711,112 @@ as it starts, from the <a class="reference download internal" href="https://gith
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>A Vertex AI express mode API key belongs to no project. To use one, change the substitution to
-<code class="docutils literal notranslate"><span class="pre">/v1/publishers/google/models/\1</span></code>.</p>
+<code class="docutils literal notranslate"><span class="pre">/v1/publishers/google/</span></code>.</p>
 </div>
-<p>The AI Protocol Manager cannot read a compressed response, so the routes remove the client’s <code class="docutils literal notranslate"><span class="pre">accept-encoding</span></code>
-header.</p>
+<p>The AI Protocol Manager cannot read a compressed response, so the virtual host removes the client’s
+<code class="docutils literal notranslate"><span class="pre">accept-encoding</span></code> header.</p>
+</section>
+<section id="api-keys">
+<h3>API keys<a class="headerlink" href="#api-keys" title="Link to this heading"></a></h3>
+<p>The keys are <a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/api-v3/config/bootstrap/v3/bootstrap.proto#envoy-v3-api-field-config-bootstrap-v3-bootstrap-staticresources-secrets" title="(in envoy v1.40.0-dev-c66182)"><span class="xref std std-ref">static secrets</span></a>, read
+from the environment as Envoy starts:</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="linenos">189</span><span class="w">  </span><span class="nt">secrets</span><span class="p">:</span>
+<span class="linenos">190</span><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">openai_api_key</span>
+<span class="linenos">191</span><span class="w">    </span><span class="nt">generic_secret</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">secret</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">environment_variable</span><span class="p">:</span><span class="w"> </span><span class="nv">OPENAI_API_KEY</span><span class="p p-Indicator">}}</span>
+<span class="linenos">192</span><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">anthropic_api_key</span>
+<span class="linenos">193</span><span class="w">    </span><span class="nt">generic_secret</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">secret</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">environment_variable</span><span class="p">:</span><span class="w"> </span><span class="nv">ANTHROPIC_API_KEY</span><span class="p p-Indicator">}}</span>
+<span class="linenos">194</span><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vertex_api_key</span>
+<span class="linenos">195</span><span class="w">    </span><span class="nt">generic_secret</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">secret</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">environment_variable</span><span class="p">:</span><span class="w"> </span><span class="nv">VERTEX_API_KEY</span><span class="p p-Indicator">}}</span>
+</pre></div>
+</div>
+<p>A <a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/credential_injector_filter#config-http-filters-credential-injector" title="(in envoy v1.40.0-dev-c66182)"><span class="xref std std-ref">credential injector</span></a> sets one header from one secret, so the router
+runs one for each provider, as
+<a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/api-v3/extensions/filters/http/router/v3/router.proto#envoy-v3-api-field-extensions-filters-http-router-v3-router-upstream-http-filters" title="(in envoy v1.40.0-dev-c66182)"><span class="xref std std-ref">upstream HTTP filters</span></a>.
+Here is OpenAI’s:</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="linenos">149</span><span class="w">          </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">envoy.filters.http.router</span>
+<span class="linenos">150</span><span class="w">            </span><span class="nt">typed_config</span><span class="p">:</span>
+<span class="linenos">151</span><span class="w">              </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.filters.http.router.v3.Router</span>
+<span class="linenos">152</span><span class="w">              </span><span class="c1"># Each sets one provider's key, from the secrets below, on the requests of the routes that</span>
+<span class="linenos">153</span><span class="w">              </span><span class="c1"># enable it: as upstream filters, they are created once the model's route is picked.</span>
+<span class="linenos">154</span><span class="w">              </span><span class="nt">upstream_http_filters</span><span class="p">:</span>
+<span class="linenos">155</span><span class="w">              </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">openai_key</span>
+<span class="linenos">156</span><span class="w">                </span><span class="nt">disabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="linenos">157</span><span class="w">                </span><span class="nt">typed_config</span><span class="p">:</span>
+<span class="linenos">158</span><span class="w">                  </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.filters.http.credential_injector.v3.CredentialInjector</span>
+<span class="linenos">159</span><span class="w">                  </span><span class="nt">credential</span><span class="p">:</span>
+<span class="linenos">160</span><span class="w">                    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">envoy.http.injected_credentials.generic</span>
+<span class="linenos">161</span><span class="w">                    </span><span class="nt">typed_config</span><span class="p">:</span>
+<span class="linenos">162</span><span class="w">                      </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.http.injected_credentials.generic.v3.Generic</span>
+<span class="linenos">163</span><span class="w">                      </span><span class="nt">credential</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="nv">openai_api_key</span><span class="p p-Indicator">}</span>
+<span class="linenos">164</span><span class="w">                      </span><span class="nt">header_value_prefix</span><span class="p">:</span><span class="w"> </span><span class="s">"Bearer</span><span class="nv"> </span><span class="s">"</span>
+</pre></div>
+</div>
+<p>Anthropic’s and Vertex AI’s set <code class="docutils literal notranslate"><span class="pre">x-api-key</span></code> and <code class="docutils literal notranslate"><span class="pre">x-goog-api-key</span></code> instead, with no prefix. Every injector is
+<a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/api-v3/extensions/filters/network/http_connection_manager/v3/http_connection_manager.proto#envoy-v3-api-field-extensions-filters-network-http-connection-manager-v3-httpfilter-disabled" title="(in envoy v1.40.0-dev-c66182)"><span class="xref std std-ref">disabled</span></a>
+unless a route enables it, as Anthropic’s route enables <code class="docutils literal notranslate"><span class="pre">anthropic_key</span></code>, so each provider is only sent its own key.</p>
+<p>The injectors are upstream filters because a route can only enable a filter when the filter is created. The router
+creates its upstream filters as it sends the request, once the model’s route is picked, whereas the HTTP filters are
+created as the request arrives, on the <code class="docutils literal notranslate"><span class="pre">chat_completions</span></code> route.</p>
+<p>No provider is sent a credential the client sent: the virtual host removes <code class="docutils literal notranslate"><span class="pre">authorization</span></code>, <code class="docutils literal notranslate"><span class="pre">x-api-key</span></code> and
+<code class="docutils literal notranslate"><span class="pre">x-goog-api-key</span></code>. A request for a provider whose key is empty is not sent at all, but answered by its injector with
+a <code class="docutils literal notranslate"><span class="pre">401</span></code>:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>docker<span class="w"> </span>compose<span class="w"> </span>logs<span class="w"> </span>proxy<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>failed_to_inject_credential
+<span class="go">proxy-1  | gpt-4o-mini -&gt; api.openai.com/v1/chat/completions 401 failed_to_inject_credential</span>
+</pre></div>
+</div>
 </section>
 <section id="one-cluster-for-every-provider">
 <h3>One cluster for every provider<a class="headerlink" href="#one-cluster-for-every-provider" title="Link to this heading"></a></h3>
-<p>The <code class="docutils literal notranslate"><span class="pre">dynamic_forward_proxy</span></code> HTTP filter looks up the host that the route names, and the requests of every route go
-to the same <a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/http/http_proxy#arch-overview-http-dynamic-forward-proxy" title="(in envoy v1.40.0-dev-1d950c)"><span class="xref std std-ref">dynamic forward proxy</span></a> cluster, which connects to it:</p>
-<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="linenos">171</span><span class="w">  </span><span class="nt">clusters</span><span class="p">:</span>
-<span class="linenos">172</span><span class="w">  </span><span class="c1"># One cluster for every provider. It connects to the host the route's dynamic forward proxy</span>
-<span class="linenos">173</span><span class="w">  </span><span class="c1"># config names, with that host as the TLS SNI and the name to validate the certificate against.</span>
-<span class="linenos">174</span><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dynamic_forward_proxy_cluster</span>
-<span class="linenos">175</span><span class="w">    </span><span class="nt">lb_policy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CLUSTER_PROVIDED</span>
-<span class="linenos">176</span><span class="w">    </span><span class="nt">cluster_type</span><span class="p">:</span>
-<span class="linenos">177</span><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">envoy.clusters.dynamic_forward_proxy</span>
-<span class="linenos">178</span><span class="w">      </span><span class="nt">typed_config</span><span class="p">:</span>
-<span class="linenos">179</span><span class="w">        </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.clusters.dynamic_forward_proxy.v3.ClusterConfig</span>
-<span class="linenos">180</span><span class="w">        </span><span class="nt">dns_cache_config</span><span class="p">:</span>
-<span class="linenos">181</span><span class="w">          </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dynamic_forward_proxy_cache_config</span>
-<span class="linenos">182</span><span class="w">          </span><span class="nt">dns_lookup_family</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">V4_ONLY</span>
-<span class="linenos">183</span><span class="w">    </span><span class="nt">transport_socket</span><span class="p">:</span>
-<span class="linenos">184</span><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">envoy.transport_sockets.tls</span>
-<span class="linenos">185</span><span class="w">      </span><span class="nt">typed_config</span><span class="p">:</span>
-<span class="linenos">186</span><span class="w">        </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext</span>
-<span class="linenos">187</span><span class="w">        </span><span class="nt">common_tls_context</span><span class="p">:</span>
-<span class="linenos">188</span><span class="w">          </span><span class="nt">validation_context</span><span class="p">:</span>
-<span class="linenos">189</span><span class="w">            </span><span class="nt">trusted_ca</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">filename</span><span class="p">:</span><span class="w"> </span><span class="nv">/etc/ssl/certs/ca-certificates.crt</span><span class="p p-Indicator">}</span>
+<p>The requests of every route go to the same <a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/http/http_proxy#arch-overview-http-dynamic-forward-proxy" title="(in envoy v1.40.0-dev-c66182)"><span class="xref std std-ref">dynamic forward proxy</span></a>
+cluster, which looks up the host the route set with <code class="docutils literal notranslate"><span class="pre">host_rewrite_literal</span></code>, and connects to it:</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="linenos">197</span><span class="w">  </span><span class="nt">clusters</span><span class="p">:</span>
+<span class="linenos">198</span><span class="w">  </span><span class="c1"># One cluster for every provider. It resolves and connects to the host the route rewrites the</span>
+<span class="linenos">199</span><span class="w">  </span><span class="c1"># request to, with that host as the TLS SNI and the name to validate the certificate against.</span>
+<span class="linenos">200</span><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dynamic_forward_proxy_cluster</span>
+<span class="linenos">201</span><span class="w">    </span><span class="nt">lb_policy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CLUSTER_PROVIDED</span>
+<span class="linenos">202</span><span class="w">    </span><span class="nt">cluster_type</span><span class="p">:</span>
+<span class="linenos">203</span><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">envoy.clusters.dynamic_forward_proxy</span>
+<span class="linenos">204</span><span class="w">      </span><span class="nt">typed_config</span><span class="p">:</span>
+<span class="linenos">205</span><span class="w">        </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.clusters.dynamic_forward_proxy.v3.ClusterConfig</span>
+<span class="linenos">206</span><span class="w">        </span><span class="nt">dns_cache_config</span><span class="p">:</span>
+<span class="linenos">207</span><span class="w">          </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dynamic_forward_proxy_cache_config</span>
+<span class="linenos">208</span><span class="w">          </span><span class="nt">dns_lookup_family</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">V4_ONLY</span>
+<span class="linenos">209</span><span class="w">    </span><span class="nt">transport_socket</span><span class="p">:</span>
+<span class="linenos">210</span><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">envoy.transport_sockets.tls</span>
+<span class="linenos">211</span><span class="w">      </span><span class="nt">typed_config</span><span class="p">:</span>
+<span class="linenos">212</span><span class="w">        </span><span class="s">"@type"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext</span>
+<span class="linenos">213</span><span class="w">        </span><span class="nt">common_tls_context</span><span class="p">:</span>
+<span class="linenos">214</span><span class="w">          </span><span class="nt">validation_context</span><span class="p">:</span>
+<span class="linenos">215</span><span class="w">            </span><span class="nt">trusted_ca</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">filename</span><span class="p">:</span><span class="w"> </span><span class="nv">/etc/ssl/certs/ca-certificates.crt</span><span class="p p-Indicator">}</span>
 </pre></div>
 </div>
-<p>The cluster uses TLS, with the host as the SNI and as the name the provider’s certificate is validated against. Adding
-a provider takes a route, not a cluster.</p>
+<p>The cluster looks each host up itself, the first time a request needs it, so it needs no dynamic forward proxy HTTP
+filter. It uses TLS, with the host as the SNI and as the name the provider’s certificate is validated against. Adding
+a provider takes a route, a secret and a credential injector, not a cluster.</p>
 </section>
 <section id="limitations">
 <h3>Limitations<a class="headerlink" href="#limitations" title="Link to this heading"></a></h3>
 <ul class="simple">
-<li><p>An error response, such as the <code class="docutils literal notranslate"><span class="pre">401</span></code> of a provider whose key is not set, is forwarded in the provider’s own
-format: the transcoder only converts successful responses.</p></li>
+<li><p>An error response, such as a provider’s <code class="docutils literal notranslate"><span class="pre">401</span></code> for a key it rejects, is forwarded in the provider’s own format:
+the transcoder only converts successful responses. Envoy’s own <code class="docutils literal notranslate"><span class="pre">401</span></code>, for a provider whose key is not set, is plain
+text.</p></li>
 <li><p>Not every field has a mapping yet: tool calls are not transcoded for Anthropic and Gemini.</p></li>
 <li><p>Each request is parsed twice, once by each AI Protocol Manager.</p></li>
 </ul>
 <div class="admonition seealso">
 <p class="admonition-title">See also</p>
 <dl class="simple">
-<dt><a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/ai_protocol_manager_filter#config-http-filters-ai-protocol-manager" title="(in envoy v1.40.0-dev-1d950c)"><span class="xref std std-ref">AI Protocol Manager</span></a></dt><dd><p>Learn more about the AI Protocol Manager filter and its AI filters.</p>
+<dt><a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/ai_protocol_manager_filter#config-http-filters-ai-protocol-manager" title="(in envoy v1.40.0-dev-c66182)"><span class="xref std std-ref">AI Protocol Manager</span></a></dt><dd><p>Learn more about the AI Protocol Manager filter and its AI filters.</p>
 </dd>
-<dt><a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/api-v3/extensions/http/ai_filters/transcoder/v3/transcoder.proto#envoy-v3-api-msg-extensions-http-ai-filters-transcoder-v3-transcoder" title="(in envoy v1.40.0-dev-1d950c)"><span class="xref std std-ref">Transcoder API</span></a></dt><dd><p>The transcoder AI filter’s configuration.</p>
+<dt><a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/api-v3/extensions/http/ai_filters/transcoder/v3/transcoder.proto#envoy-v3-api-msg-extensions-http-ai-filters-transcoder-v3-transcoder" title="(in envoy v1.40.0-dev-c66182)"><span class="xref std std-ref">Transcoder API</span></a></dt><dd><p>The transcoder AI filter’s configuration.</p>
 </dd>
-<dt><a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/configuration/advanced/well_known_filter_state#well-known-filter-state" title="(in envoy v1.40.0-dev-1d950c)"><span class="xref std std-ref">Well known filter state</span></a></dt><dd><p>Learn more about the <code class="docutils literal notranslate"><span class="pre">envoy.ai.model.request</span></code> filter state object.</p>
+<dt><a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/configuration/advanced/well_known_filter_state#well-known-filter-state" title="(in envoy v1.40.0-dev-c66182)"><span class="xref std std-ref">Well known filter state</span></a></dt><dd><p>Learn more about the <code class="docutils literal notranslate"><span class="pre">envoy.ai.model.request</span></code> filter state object.</p>
 </dd>
-<dt><a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/set_filter_state#config-http-filters-set-filter-state" title="(in envoy v1.40.0-dev-1d950c)"><span class="xref std std-ref">Set filter state</span></a></dt><dd><p>Learn more about the set filter state filter.</p>
+<dt><a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/set_filter_state#config-http-filters-set-filter-state" title="(in envoy v1.40.0-dev-c66182)"><span class="xref std std-ref">Set filter state</span></a></dt><dd><p>Learn more about the set filter state filter.</p>
 </dd>
-<dt><a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/http/http_proxy#arch-overview-http-dynamic-forward-proxy" title="(in envoy v1.40.0-dev-1d950c)"><span class="xref std std-ref">Dynamic forward proxy</span></a></dt><dd><p>Learn more about Envoy’s dynamic forward proxy.</p>
+<dt><a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/credential_injector_filter#config-http-filters-credential-injector" title="(in envoy v1.40.0-dev-c66182)"><span class="xref std std-ref">Credential injector</span></a></dt><dd><p>Learn more about the credential injector filter.</p>
+</dd>
+<dt><a class="reference external" href="https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/http/http_proxy#arch-overview-http-dynamic-forward-proxy" title="(in envoy v1.40.0-dev-c66182)"><span class="xref std std-ref">Dynamic forward proxy</span></a></dt><dd><p>Learn more about Envoy’s dynamic forward proxy.</p>
 </dd>
 </dl>
 </div>
@@ -771,7 +824,7 @@ format: the transcoder only converts successful responses.</p></li>
 </section>
 </section>
   </article>
-  <p class="source">Built from <a href="https://github.com/envoyproxy/examples/tree/fbdcae6f549a6e20ed071596f76019e5b0786b8f/ai-transcoder">envoyproxy/examples/ai-transcoder at fbdcae6</a>.
+  <p class="source">Built from <a href="https://github.com/botengyao/examples/tree/24cab85/ai-transcoder">botengyao/examples/ai-transcoder at 24cab85</a>.
     Links into the Envoy docs go to envoyproxy.io/docs/envoy/latest.</p>
 </div>
 <script>
