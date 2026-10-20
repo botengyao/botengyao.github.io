@@ -3,7 +3,7 @@ title: "Stateless MCP in Envoy 1.40"
 date: 2026-10-20T12:00:00+08:00
 draft: false
 tags: ["envoy", "mcp", "ai-gateway", "protocols"]
-summary: "MCP's 2026-07-28 revision makes the protocol stateless, so MCP traffic now looks a lot like ordinary HTTP. Envoy 1.40 builds on that: route MCP requests by tool name, stop malformed or spoofed requests at the proxy, and turn any REST API into an MCP server using only config."
+summary: "MCP's 2026-07-28 revision makes the protocol stateless, so MCP traffic now looks a lot like ordinary HTTP. Envoy 1.40 builds on that: route MCP requests by tool name, stop malformed or spoofed requests at the proxy, control who can call which tool, and turn any REST API into an MCP server using only config."
 ---
 
 AI agents use the [Model Context Protocol](https://modelcontextprotocol.io) (MCP) to discover and call tools. The revision published on 2026-07-28 changes MCP in a way that matters to anyone running it at scale: **MCP is now stateless.** There's no connection handshake and no session to keep track of. Each request carries everything a server needs to handle it.
@@ -12,6 +12,7 @@ That makes MCP traffic look a lot like ordinary HTTP traffic, which is exactly w
 
 - **route MCP requests by tool name**, using standard Envoy route configuration;
 - **stop malformed or spoofed requests at the proxy**, before they reach your servers;
+- **control who can call which tool**, with Envoy's RBAC and external authorization filters;
 - **turn an existing REST API into an MCP server**, with config alone and no new code.
 
 ## What changed in MCP
@@ -169,6 +170,87 @@ The client gets a standard MCP error (`-32020`, HeaderMismatch), so MCP SDKs can
 
 Not ready to block traffic yet? Leave `traffic_mode` at its default, `PASS_THROUGH`, with `attribute_source` set to `BODY` or `VERIFY`. Envoy then lets every request through, routes on what the body says, and counts header mismatches in the `mcp.header_mismatch` stat, so you can see what enforcement would do before you turn it on.
 
+## Control who can call which tool
+
+Not all tools carry the same risk. Reading the weather is harmless; deleting a record is not. The MCP filter puts the tool name into Envoy's request metadata, so Envoy's existing authorization filters can make per-tool decisions. You don't need a new policy engine. Add the authorization filter after the MCP filter in the same chain.
+
+On the MCP filter, set `traffic_mode: REJECT_NO_MCP` and `attribute_source: VERIFY` (or `BODY`). The tool name then comes from the request body, which is the call the server will actually run. Requests whose headers disagree with the body are rejected before any policy is checked.
+
+### RBAC: rules in config
+
+The RBAC filter can match on the MCP filter's metadata. This rule blocks `delete_record` for any caller without the `admin` role:
+
+```yaml
+- name: envoy.filters.http.rbac
+  typed_config:
+    "@type": type.googleapis.com/envoy.extensions.filters.http.rbac.v3.RBAC
+    rules:
+      action: DENY
+      policies:
+        delete-requires-admin:
+          permissions:
+          - metadata:
+              filter: envoy.filters.http.mcp
+              path: [{key: params}, {key: name}]
+              value: {string_match: {exact: delete_record}}
+          principals:
+          - not_id:
+              header: {name: x-user-role, string_match: {exact: admin}}
+```
+
+Calling each tool with and without the role gives:
+
+```text
+tools/call get_weather                        -> 200, reaches the MCP server
+tools/call delete_record                      -> 403  RBAC: access denied
+tools/call delete_record (x-user-role: admin) -> 200, reaches the MCP server
+```
+
+Spoofing the header doesn't get around the rule. A request that names `get_weather` in `Mcp-Name` but `delete_record` in the body is rejected with `-32020` before RBAC runs. A request that claims an older protocol version is still denied, because the tool name comes from the body.
+
+In production, set the role from a verified identity, for example a claim in a JWT validated by Envoy's JWT authentication filter. Never use a value the client sends directly.
+
+### ext_authz: decisions in your own service
+
+When the decision depends on more than static rules, such as user entitlements, tenant limits, or an approval step, use the external authorization filter with a gRPC authorization service. `metadata_context_namespaces` tells Envoy to include the MCP filter's metadata in each check:
+
+```yaml
+- name: envoy.filters.http.ext_authz
+  typed_config:
+    "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
+    transport_api_version: V3
+    grpc_service:
+      envoy_grpc: {cluster_name: authz}
+    metadata_context_namespaces: [envoy.filters.http.mcp]
+```
+
+For a `delete_record` call, the authorization service receives this metadata alongside the usual request attributes:
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "delete_record",
+    "_meta": {
+      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+      "io.modelcontextprotocol/clientCapabilities": {}
+    }
+  },
+  "id": 1,
+  "jsonrpc": "2.0",
+  "is_mcp_request": true,
+  "status": "mcp_ok"
+}
+```
+
+The service reads `params.name`, applies its own logic, and answers allow or deny. A small test service that requires the admin role for `delete_record` produced:
+
+```text
+tools/call get_weather                        -> 200, reaches the MCP server
+tools/call delete_record                      -> 403  tool delete_record requires the admin role
+tools/call delete_record (x-user-role: admin) -> 200, reaches the MCP server
+```
+
 ## Turn a REST API into an MCP server
 
 Many tools you want to give an agent already exist as REST APIs. The MCP REST bridge lets Envoy present them as an MCP server, with no changes to the API:
@@ -324,3 +406,4 @@ The MCP extensions are marked alpha in 1.40. Try them out, and share feedback on
 - [MCP 2026-07-28 changelog](https://modelcontextprotocol.io/specification/2026-07-28/changelog) and [Streamable HTTP transport](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http)
 - [SEP-2575: Make MCP stateless](https://modelcontextprotocol.io/seps/2575-stateless-mcp)
 - [Envoy 1.40.0 release notes](https://www.envoyproxy.io/docs/envoy/v1.40.0/version_history/v1.40/v1.40.0) and [MCP filter docs](https://www.envoyproxy.io/docs/envoy/v1.40.0/configuration/http/http_filters/mcp_filter)
+- Envoy authorization: [RBAC filter](https://www.envoyproxy.io/docs/envoy/v1.40.0/configuration/http/http_filters/rbac_filter) and [external authorization filter](https://www.envoyproxy.io/docs/envoy/v1.40.0/configuration/http/http_filters/ext_authz_filter)
