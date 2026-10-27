@@ -93,6 +93,41 @@ Anything that writes filter state can set these: `set_filter_state`, Lua, or ext
 
 Clients keep their SDKs and their own keys. Envoy validates and describes each request, counts tokens on each response, and forwards everything as is. Full config: [observe.yaml](https://github.com/botengyao/botengyao.github.io/blob/main/examples/ai-protocol-manager/configs/observe.yaml).
 
+<figure>
+<svg width="100%" viewBox="0 0 720 176" role="img" xmlns="http://www.w3.org/2000/svg" style="max-width:720px">
+<title>Observing native LLM APIs</title>
+<desc>The client calls its provider through Envoy with its own SDK and key. The AI Protocol Manager validates the body, describes the request, and forwards the client's exact bytes. On the way back it reads token usage from the provider's response without changing it. Both records are published as typed metadata for the access log or ext_proc.</desc>
+<defs>
+<marker id="aipmD" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#57606a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+</defs>
+<rect x="1" y="1" width="718" height="174" rx="10" fill="#ffffff" stroke="#d0d7de"/>
+<rect x="16" y="36" width="112" height="60" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="72" y="62" font-family="system-ui,sans-serif" font-size="12.5" font-weight="600" fill="#1f2328" text-anchor="middle">Client</text>
+<text x="72" y="79" font-family="system-ui,sans-serif" font-size="10.5" fill="#57606a" text-anchor="middle">own SDK, own key</text>
+<rect x="196" y="20" width="328" height="92" rx="6" fill="#E1F5EE" stroke="#0F6E56"/>
+<text x="212" y="42" font-family="system-ui,sans-serif" font-size="12.5" font-weight="600" fill="#085041">AI Protocol Manager</text>
+<text x="212" y="62" font-family="system-ui,sans-serif" font-size="11" fill="#1f2328">schema_validation: a bad body gets its 400 here</text>
+<text x="212" y="80" font-family="system-ui,sans-serif" font-size="11" fill="#1f2328">request_info: model, stream, token cap, counts</text>
+<text x="212" y="98" font-family="system-ui,sans-serif" font-size="11" fill="#1f2328">token_usage: read off the provider's response</text>
+<rect x="592" y="36" width="112" height="60" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="648" y="62" font-family="system-ui,sans-serif" font-size="12.5" font-weight="600" fill="#1f2328" text-anchor="middle">Provider</text>
+<text x="648" y="79" font-family="system-ui,sans-serif" font-size="10.5" fill="#57606a" text-anchor="middle">native API</text>
+<line x1="128" y1="56" x2="192" y2="56" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmD)"/>
+<line x1="524" y1="56" x2="588" y2="56" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmD)"/>
+<line x1="592" y1="78" x2="528" y2="78" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmD)"/>
+<line x1="196" y1="78" x2="132" y2="78" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmD)"/>
+<text x="162" y="49" font-family="system-ui,sans-serif" font-size="10" fill="#57606a" text-anchor="middle">request</text>
+<text x="162" y="93" font-family="system-ui,sans-serif" font-size="10" fill="#57606a" text-anchor="middle">response</text>
+<text x="558" y="49" font-family="system-ui,sans-serif" font-size="10" fill="#57606a" text-anchor="middle">same bytes</text>
+<text x="558" y="93" font-family="system-ui,sans-serif" font-size="10" fill="#57606a" text-anchor="middle">untouched</text>
+<line x1="360" y1="112" x2="360" y2="128" stroke="#0F6E56" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#aipmD)"/>
+<rect x="196" y="132" width="328" height="30" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="360" y="151" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10" fill="#1f2328" text-anchor="middle">envoy.ai.request_info · envoy.ai.token_usage</text>
+<text x="534" y="151" font-family="system-ui,sans-serif" font-size="10.5" fill="#57606a">→ access log, ext_proc</text>
+</svg>
+<figcaption>Observing only reads. The provider gets the client's bytes and key, and Envoy keeps a description of each request and its token count.</figcaption>
+</figure>
+
 ```yaml
 virtual_hosts:
 - name: providers
@@ -151,6 +186,19 @@ Things the tests ran into:
 
 One filter chain serves every route. The base URL picks the backend and the path the client's API, so each pairing is one route. Full config: [gateway.yaml](https://github.com/botengyao/botengyao.github.io/blob/main/examples/ai-protocol-manager/configs/gateway.yaml).
 
+| Base URL | Client | Backend | Needs, besides the two APIs |
+|---|---|---|---|
+| `/claude/v1` | OpenAI SDK | Claude | backend path |
+| `/gemini/v1` | OpenAI SDK | Gemini | nothing |
+| `/gemini` | Claude Code | Gemini | model |
+| `/openai` | Claude Code | OpenAI-compatible | backend path, model |
+| `/claude` | Gemini SDK | Claude | client path, backend path, model |
+| `/vertex/claude/v1` | OpenAI SDK | Claude on Vertex AI | backend path with body edits |
+| `/vertex/gemini/v1` | OpenAI SDK | Gemini on Vertex AI | backend path |
+| `/v1` | Claude Code on Vertex AI | Gemini on Vertex AI | backend path, model |
+
+"Model" is `envoy.ai.model.resolved`, for clients that ask for a model the backend doesn't have. "Path" is a binding, explained below.
+
 ```yaml
 http_filters:
 - name: envoy.filters.http.set_filter_state     # per-route model overrides
@@ -185,6 +233,63 @@ Credentials belong to the gateway. The virtual host strips whatever the client s
 ### OpenAI SDK to Claude
 
 `base_url="http://localhost:10000/claude/v1"`:
+
+<figure>
+<svg width="100%" viewBox="0 0 720 336" role="img" xmlns="http://www.w3.org/2000/svg" style="max-width:720px">
+<title>One request from the OpenAI SDK to Claude</title>
+<desc>The client sends an OpenAI Chat request to /claude/v1/chat/completions with its own key. Envoy drops the client's key and adds Claude's, the first transcoder keeps OpenAI Chat as is, the second writes Anthropic Messages, the binding sets the path to /v1/messages, and the host is rewritten to Claude's. Claude receives a Messages request with a top-level system field and max_tokens. Claude's answer, with its usage, is read for token usage and converted back into an OpenAI chat completion.</desc>
+<defs>
+<marker id="aipmE" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#57606a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+</defs>
+<rect x="1" y="1" width="718" height="334" rx="10" fill="#ffffff" stroke="#d0d7de"/>
+<text x="16" y="23" font-family="system-ui,sans-serif" font-size="10.5" font-weight="600" fill="#57606a">request</text>
+<rect x="16" y="32" width="210" height="180" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="28" y="52" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#1f2328">Client sends&#160;<tspan font-weight="400" fill="#57606a">OpenAI Chat</tspan></text>
+<text x="28" y="74" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9.5" fill="#1f2328">POST /claude/v1/chat/completions</text>
+<text x="28" y="89" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9.5" fill="#1f2328">authorization: Bearer ‹client›</text>
+<text x="28" y="111" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9.5" fill="#1f2328">{"model": "claude-sonnet-4-5",</text>
+<text x="34" y="126" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9.5" fill="#1f2328">"messages": [system, user]}</text>
+<rect x="246" y="32" width="228" height="180" rx="6" fill="#E1F5EE" stroke="#0F6E56"/>
+<text x="258" y="52" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#085041">Envoy</text>
+<text x="258" y="74" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328">virtual host: drop the client's key</text>
+<text x="258" y="92" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328">route: add Claude's key and version</text>
+<text x="258" y="110" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328">transcoder 1: OpenAI Chat as is</text>
+<text x="258" y="128" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328">transcoder 2: → Anthropic Messages</text>
+<text x="258" y="146" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328">binding: path → /v1/messages</text>
+<text x="258" y="164" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328">auto_host_rewrite: Claude's host</text>
+<rect x="494" y="32" width="210" height="180" rx="6" fill="#ffffff" stroke="#d0d7de"/>
+<text x="506" y="52" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#1f2328">Claude receives&#160;<tspan font-weight="400" fill="#57606a">Messages</tspan></text>
+<text x="506" y="74" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9.5" fill="#1f2328">POST /v1/messages</text>
+<text x="506" y="89" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9.5" fill="#1f2328">host: api.anthropic.com</text>
+<text x="506" y="104" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9.5" fill="#1f2328">x-api-key: ‹gateway's›</text>
+<text x="506" y="119" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9.5" fill="#1f2328">anthropic-version: 2023-06-01</text>
+<text x="506" y="141" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9.5" fill="#1f2328">{"model": "claude-sonnet-4-5",</text>
+<text x="512" y="156" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9.5" fill="#1f2328">"system": "Be brief.",</text>
+<text x="512" y="171" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9.5" fill="#1f2328">"messages": [user],</text>
+<text x="512" y="186" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9.5" fill="#1f2328">"max_tokens": …}</text>
+<line x1="226" y1="122" x2="242" y2="122" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmE)"/>
+<line x1="474" y1="122" x2="490" y2="122" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmE)"/>
+<text x="16" y="236" font-family="system-ui,sans-serif" font-size="10.5" font-weight="600" fill="#57606a">response</text>
+<rect x="16" y="244" width="210" height="78" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="28" y="264" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#1f2328">Client gets&#160;<tspan font-weight="400" fill="#57606a">OpenAI Chat</tspan></text>
+<text x="28" y="284" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9.5" fill="#1f2328">{"object": "chat.completion",</text>
+<text x="34" y="299" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9.5" fill="#1f2328">"choices": [{"message": …}],</text>
+<text x="34" y="314" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9.5" fill="#1f2328">"usage": {…}}</text>
+<rect x="246" y="244" width="228" height="78" rx="6" fill="#E1F5EE" stroke="#0F6E56"/>
+<text x="258" y="264" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328">token_usage: 12 in, 6 out</text>
+<text x="258" y="282" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328">transcoder 2: → OpenAI Chat</text>
+<text x="258" y="300" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328">transcoder 1: OpenAI Chat as is</text>
+<text x="258" y="316" font-family="system-ui,sans-serif" font-size="10.5" font-style="italic" fill="#57606a">JSON and SSE alike</text>
+<rect x="494" y="244" width="210" height="78" rx="6" fill="#ffffff" stroke="#d0d7de"/>
+<text x="506" y="264" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#1f2328">Claude answers&#160;<tspan font-weight="400" fill="#57606a">Messages</tspan></text>
+<text x="506" y="284" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9.5" fill="#1f2328">{"content": [text block],</text>
+<text x="512" y="299" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9.5" fill="#1f2328">"usage": {"input_tokens": 12,</text>
+<text x="569" y="314" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9.5" fill="#1f2328">"output_tokens": 6}}</text>
+<line x1="494" y1="283" x2="478" y2="283" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmE)"/>
+<line x1="246" y1="283" x2="230" y2="283" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmE)"/>
+</svg>
+<figcaption>The client and Claude each see only their own API. The key, path, host and body shape change inside Envoy.</figcaption>
+</figure>
 
 ```yaml
 - match: {path: /claude/v1/chat/completions}
@@ -247,6 +352,7 @@ response: {llm_protocol: ANTHROPIC_MESSAGES, binding: {uri_pattern: /v1/messages
 ```
 
 - **`request.binding`**: Gemini puts the model and the streaming mode in the path. Envoy knows Gemini's own path and Vertex AI's, but not your prefix, so this pattern says where `{model}` sits. `{generateContent|streamGenerateContent?alt=sse}` reads `stream`. `maxOutputTokens` becomes `max_tokens`.
+- **`envoy.ai.model.resolved: claude-sonnet-4-5`**, set the same way as for Claude Code below: the SDK asks for a Gemini model.
 
 ### Vertex AI
 
@@ -269,6 +375,27 @@ OpenAI clients to Claude on Vertex AI:
           - {body_field: model}
           - {body_field: anthropic_version, value: vertex-2023-10-16, keep_existing: true}
 ```
+
+<figure>
+<svg width="100%" viewBox="0 0 720 264" role="img" xmlns="http://www.w3.org/2000/svg" style="max-width:720px">
+<title>How a binding renders a Vertex AI request</title>
+<desc>The second transcoder writes an Anthropic Messages body with model and stream. The binding's pattern takes the model from the body into the path, and stream picks rawPredict or streamRawPredict. The first mutation removes model from the body, and the second adds anthropic_version. Vertex AI receives a POST to the streamRawPredict path for the model, with anthropic_version, stream, messages and max_tokens in the body.</desc>
+<rect x="1" y="1" width="718" height="262" rx="10" fill="#ffffff" stroke="#d0d7de"/>
+<text x="16" y="22" font-family="system-ui,sans-serif" font-size="11" font-weight="600" fill="#1f2328">1  transcoder 2 writes Anthropic Messages</text>
+<rect x="16" y="30" width="688" height="34" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="28" y="51" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10.5" fill="#1f2328">{<tspan fill="#0F6E56" font-weight="600">"model": "claude-sonnet-4-5@20250929"</tspan>,&#160;<tspan fill="#9A6700" font-weight="600">"stream": true</tspan>, "messages": […], "max_tokens": …}</text>
+<text x="16" y="90" font-family="system-ui,sans-serif" font-size="11" font-weight="600" fill="#1f2328">2  the binding renders the path and edits the body</text>
+<rect x="16" y="98" width="688" height="68" rx="6" fill="#E1F5EE" stroke="#0F6E56"/>
+<text x="28" y="119" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10.5" fill="#1f2328">uri_pattern: /v1/projects/…/publishers/anthropic/models/<tspan fill="#0F6E56" font-weight="600">{model}</tspan>:<tspan fill="#9A6700" font-weight="600">{rawPredict|streamRawPredict}</tspan></text>
+<text x="28" y="138" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10.5" fill="#1f2328">mutations:&#160;<tspan fill="#0F6E56" font-weight="600">{body_field: model}</tspan>,&#160;<tspan fill="#0969DA" font-weight="600">{body_field: anthropic_version, value: vertex-2023-10-16}</tspan></text>
+<text x="28" y="157" font-family="system-ui,sans-serif" font-size="10.5" fill="#57606a">{model} takes the body's model, and the first mutation removes it from the body. stream picks the method and stays.</text>
+<text x="16" y="190" font-family="system-ui,sans-serif" font-size="11" font-weight="600" fill="#1f2328">3  Vertex AI receives</text>
+<rect x="16" y="198" width="688" height="52" rx="6" fill="#ffffff" stroke="#0F6E56" stroke-width="1.5"/>
+<text x="28" y="219" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10.5" fill="#1f2328">POST /v1/projects/…/publishers/anthropic/models/<tspan fill="#0F6E56" font-weight="600">claude-sonnet-4-5@20250929</tspan>:<tspan fill="#9A6700" font-weight="600">streamRawPredict</tspan></text>
+<text x="28" y="238" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10.5" fill="#1f2328">{<tspan fill="#0969DA" font-weight="600">"anthropic_version": "vertex-2023-10-16"</tspan>,&#160;<tspan fill="#9A6700" font-weight="600">"stream": true</tspan>, "messages": […], "max_tokens": …}</text>
+</svg>
+<figcaption>A binding maps between the body and the path. On the client side it works the other way: it reads the model and the method out of the path, as in the Claude Code on Vertex AI route below.</figcaption>
+</figure>
 
 - Claude on Vertex AI speaks Anthropic Messages, but it takes the model in the path and needs `anthropic_version` in the body. The two **`mutations`** remove `model` and add the version. The method follows `stream`.
 - Gemini on Vertex AI needs only the pattern (`.../publishers/google/models/{model}:{generateContent|streamGenerateContent?alt=sse}`). Gemini's own edits still apply.
@@ -302,6 +429,41 @@ route:
   cluster: anthropic
   retry_policy: {retry_on: 5xx, num_retries: 1}
 ```
+
+<figure>
+<svg width="100%" viewBox="0 0 720 172" role="img" xmlns="http://www.w3.org/2000/svg" style="max-width:720px">
+<title>A retry with transcoding on the listener</title>
+<desc>The AI Protocol Manager on the listener converts the OpenAI Chat request into Anthropic Messages once, before the router. The router buffers the body. Attempt 1 to the anthropic cluster gets a 503. Attempt 2 sends the same bytes, gets a 200, and is the attempt that reports token usage.</desc>
+<defs>
+<marker id="aipmG" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#57606a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+</defs>
+<rect x="1" y="1" width="718" height="170" rx="10" fill="#ffffff" stroke="#d0d7de"/>
+<rect x="16" y="58" width="88" height="56" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="60" y="83" font-family="system-ui,sans-serif" font-size="12.5" font-weight="600" fill="#1f2328" text-anchor="middle">Client</text>
+<text x="60" y="100" font-family="system-ui,sans-serif" font-size="10.5" fill="#57606a" text-anchor="middle">OpenAI SDK</text>
+<rect x="124" y="50" width="164" height="72" rx="6" fill="#E1F5EE" stroke="#0F6E56"/>
+<text x="206" y="74" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#085041" text-anchor="middle">AIPM on the listener</text>
+<text x="206" y="94" font-family="system-ui,sans-serif" font-size="11" fill="#1f2328" text-anchor="middle">OpenAI Chat → Messages</text>
+<text x="206" y="112" font-family="system-ui,sans-serif" font-size="10.5" fill="#57606a" text-anchor="middle">once, before the router</text>
+<rect x="308" y="50" width="132" height="72" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="374" y="74" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#1f2328" text-anchor="middle">router</text>
+<text x="374" y="94" font-family="system-ui,sans-serif" font-size="10.5" fill="#57606a" text-anchor="middle">buffers the body</text>
+<text x="374" y="110" font-family="system-ui,sans-serif" font-size="10.5" fill="#57606a" text-anchor="middle">for a retry</text>
+<rect x="468" y="14" width="236" height="64" rx="6" fill="#ffffff" stroke="#d0d7de"/>
+<text x="482" y="36" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#1f2328">attempt 1 → anthropic</text>
+<text x="482" y="53" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10" fill="#57606a">POST /v1/messages</text>
+<text x="482" y="70" font-family="system-ui,sans-serif" font-size="11" font-weight="600" fill="#B22B2B">✗ 503</text>
+<rect x="468" y="94" width="236" height="64" rx="6" fill="#ffffff" stroke="#0F6E56"/>
+<text x="482" y="116" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#1f2328">attempt 2 → anthropic</text>
+<text x="482" y="133" font-family="system-ui,sans-serif" font-size="11" fill="#085041">the same bytes</text>
+<text x="482" y="150" font-family="system-ui,sans-serif" font-size="11" font-weight="600" fill="#0F6E56">✓ 200, token usage from here</text>
+<line x1="104" y1="86" x2="120" y2="86" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmG)"/>
+<line x1="288" y1="86" x2="304" y2="86" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmG)"/>
+<polyline points="440,76 454,76 454,46 464,46" fill="none" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmG)"/>
+<polyline points="440,96 454,96 454,126 464,126" fill="none" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmG)"/>
+</svg>
+<figcaption>Transcoded once, sent twice. Only the attempt that answered reports token usage.</figcaption>
+</figure>
 
 With AIPM on the listener, transcoding happens once, before the router. The router buffers the transcoded body and sends the same bytes on the retry, and token usage comes from the attempt that answered. There is nothing AI-specific to configure. Retrying on a backend with a different API needs transcoding on each attempt, which is the next section.
 
@@ -400,6 +562,69 @@ upstream_http_filters:          # every cluster without filters of its own
     "@type": type.googleapis.com/envoy.extensions.filters.http.upstream_codec.v3.UpstreamCodec
 ```
 
+<figure>
+<svg width="100%" viewBox="0 0 720 288" role="img" xmlns="http://www.w3.org/2000/svg" style="max-width:720px">
+<title>Three values relayed from the picked host to the AI Protocol Manager</title>
+<desc>On each attempt, the picked host's envoy.ai metadata holds the backend's API, its binding and its model. header_mutation copies them into the x-ai-api, x-ai-binding and x-ai-model headers using UPSTREAM_METADATA. Lua moves each header into filter state: envoy.ai.llm_protocol.response, envoy.ai.binding.response and envoy.ai.model.resolved. The AI Protocol Manager then writes that API, renders that path and sends that model.</desc>
+<defs>
+<marker id="aipmH" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#57606a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+</defs>
+<rect x="1" y="1" width="718" height="286" rx="10" fill="#ffffff" stroke="#d0d7de"/>
+<text x="248" y="22" font-family="system-ui,sans-serif" font-size="10.5" font-weight="600" fill="#57606a" text-anchor="middle">the backend's API</text>
+<text x="436" y="22" font-family="system-ui,sans-serif" font-size="10.5" font-weight="600" fill="#57606a" text-anchor="middle">how it carries it on HTTP</text>
+<text x="618" y="22" font-family="system-ui,sans-serif" font-size="10.5" font-weight="600" fill="#57606a" text-anchor="middle">the model to send</text>
+<rect x="16" y="32" width="128" height="44" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="80" y="50" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#1f2328" text-anchor="middle">picked host</text>
+<text x="80" y="66" font-family="system-ui,sans-serif" font-size="10" fill="#57606a" text-anchor="middle">envoy.ai metadata</text>
+<rect x="156" y="32" width="184" height="44" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
+<rect x="352" y="32" width="168" height="44" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
+<rect x="532" y="32" width="172" height="44" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="248" y="58" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10" fill="#1f2328" text-anchor="middle">api: GEMINI_GENERATE_CONTENT</text>
+<text x="436" y="58" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10" fill="#1f2328" text-anchor="middle">binding: "/v1/projects/…"</text>
+<text x="618" y="58" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10" fill="#1f2328" text-anchor="middle">model: gemini-2.5-flash</text>
+<rect x="16" y="98" width="128" height="44" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="80" y="116" font-family="system-ui,sans-serif" font-size="11.5" font-weight="600" fill="#1f2328" text-anchor="middle">header_mutation</text>
+<text x="80" y="132" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9" fill="#57606a" text-anchor="middle">%UPSTREAM_METADATA%</text>
+<rect x="156" y="98" width="184" height="44" rx="6" fill="#ffffff" stroke="#d0d7de"/>
+<rect x="352" y="98" width="168" height="44" rx="6" fill="#ffffff" stroke="#d0d7de"/>
+<rect x="532" y="98" width="172" height="44" rx="6" fill="#ffffff" stroke="#d0d7de"/>
+<text x="248" y="124" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10" fill="#1f2328" text-anchor="middle">x-ai-api</text>
+<text x="436" y="124" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10" fill="#1f2328" text-anchor="middle">x-ai-binding</text>
+<text x="618" y="124" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10" fill="#1f2328" text-anchor="middle">x-ai-model</text>
+<rect x="16" y="164" width="128" height="44" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="80" y="182" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#1f2328" text-anchor="middle">Lua</text>
+<text x="80" y="198" font-family="system-ui,sans-serif" font-size="10" fill="#57606a" text-anchor="middle">headers → filter state</text>
+<rect x="156" y="164" width="184" height="44" rx="6" fill="#ffffff" stroke="#d0d7de"/>
+<rect x="352" y="164" width="168" height="44" rx="6" fill="#ffffff" stroke="#d0d7de"/>
+<rect x="532" y="164" width="172" height="44" rx="6" fill="#ffffff" stroke="#d0d7de"/>
+<text x="248" y="190" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9.5" fill="#1f2328" text-anchor="middle">envoy.ai.llm_protocol.response</text>
+<text x="436" y="190" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9.5" fill="#1f2328" text-anchor="middle">envoy.ai.binding.response</text>
+<text x="618" y="190" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9.5" fill="#1f2328" text-anchor="middle">envoy.ai.model.resolved</text>
+<rect x="16" y="230" width="128" height="44" rx="6" fill="#E1F5EE" stroke="#0F6E56"/>
+<text x="80" y="248" font-family="system-ui,sans-serif" font-size="11" font-weight="600" fill="#085041" text-anchor="middle">AI Protocol Manager</text>
+<text x="80" y="264" font-family="system-ui,sans-serif" font-size="10" fill="#57606a" text-anchor="middle">on each attempt</text>
+<rect x="156" y="230" width="184" height="44" rx="6" fill="#E1F5EE" stroke="#0F6E56"/>
+<rect x="352" y="230" width="168" height="44" rx="6" fill="#E1F5EE" stroke="#0F6E56"/>
+<rect x="532" y="230" width="172" height="44" rx="6" fill="#E1F5EE" stroke="#0F6E56"/>
+<text x="248" y="256" font-family="system-ui,sans-serif" font-size="11" fill="#085041" text-anchor="middle">writes this API</text>
+<text x="436" y="256" font-family="system-ui,sans-serif" font-size="11" fill="#085041" text-anchor="middle">renders this path</text>
+<text x="618" y="256" font-family="system-ui,sans-serif" font-size="11" fill="#085041" text-anchor="middle">sends this model</text>
+<line x1="80" y1="76" x2="80" y2="94" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmH)"/>
+<line x1="80" y1="142" x2="80" y2="160" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmH)"/>
+<line x1="80" y1="208" x2="80" y2="226" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmH)"/>
+<line x1="248" y1="76" x2="248" y2="94" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmH)"/>
+<line x1="248" y1="142" x2="248" y2="160" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmH)"/>
+<line x1="248" y1="208" x2="248" y2="226" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmH)"/>
+<line x1="436" y1="76" x2="436" y2="94" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmH)"/>
+<line x1="436" y1="142" x2="436" y2="160" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmH)"/>
+<line x1="436" y1="208" x2="436" y2="226" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmH)"/>
+<line x1="618" y1="76" x2="618" y2="94" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmH)"/>
+<line x1="618" y1="142" x2="618" y2="160" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmH)"/>
+<line x1="618" y1="208" x2="618" y2="226" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmH)"/>
+</svg>
+<figcaption>On every attempt, three values relay from the host Envoy picked to the AI Protocol Manager. header_mutation can read the host but not set filter state, and Lua the other way round, so they hand off through headers that Lua then removes.</figcaption>
+</figure>
+
 - **Endpoint metadata, not cluster config**: a composite cluster runs its own upstream filters for every sub-cluster, so the only thing that identifies the backend on an attempt is the host that was picked. `%UPSTREAM_METADATA%` reads that host's metadata.
 - **header_mutation, then Lua**: `set_filter_state` can't run on a cluster yet, and Lua can't read the host's metadata. `header_mutation` can format `%UPSTREAM_METADATA%`, and Lua can set filter state, so they pass the values along in three headers.
 - **Every endpoint sets all three values.** The filter state survives across attempts, so a value one endpoint left out would be the previous attempt's.
@@ -473,12 +698,96 @@ http_filters:
     clear_route_cache: true
 ```
 
+<figure>
+<svg width="100%" viewBox="0 0 720 254" role="img" xmlns="http://www.w3.org/2000/svg" style="max-width:720px">
+<title>Routing by the model in the body</title>
+<desc>When the headers arrive the model is unknown, so the catch-all route matches; it declares request, so the body is parsed. The AI Protocol Manager's request_info reads the model into envoy.ai.model.request. set_filter_state with clear_route_cache drops the picked route, and the routes are matched again: a gemini model goes to vertex_gemini, a claude model to vertex_claude, and anything else gets a 404 without calling a provider.</desc>
+<defs>
+<marker id="aipmI" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#57606a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+</defs>
+<rect x="1" y="1" width="718" height="252" rx="10" fill="#ffffff" stroke="#d0d7de"/>
+<rect x="16" y="16" width="212" height="72" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="28" y="38" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#1f2328">1  headers arrive</text>
+<text x="28" y="58" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328">no model yet, so the catch-all</text>
+<text x="28" y="74" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328">matches; it declares&#160;<tspan font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10">request:</tspan></text>
+<rect x="254" y="16" width="212" height="72" rx="6" fill="#E1F5EE" stroke="#0F6E56"/>
+<text x="266" y="38" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#085041">2  AI Protocol Manager</text>
+<text x="266" y="58" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328">request_info reads the model into</text>
+<text x="266" y="74" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10" fill="#1f2328">envoy.ai.model.request</text>
+<rect x="492" y="16" width="212" height="72" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="504" y="38" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#1f2328">3  set_filter_state</text>
+<text x="504" y="58" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10" fill="#1f2328">clear_route_cache: true</text>
+<text x="504" y="74" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328">drops the route Envoy picked</text>
+<line x1="228" y1="52" x2="250" y2="52" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmI)"/>
+<line x1="466" y1="52" x2="488" y2="52" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmI)"/>
+<rect x="254" y="116" width="212" height="40" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="360" y="141" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#1f2328" text-anchor="middle">4  routes match again</text>
+<polyline points="598,88 598,136 470,136" fill="none" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmI)"/>
+<rect x="16" y="192" width="212" height="48" rx="6" fill="#ffffff" stroke="#0F6E56"/>
+<text x="122" y="212" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10.5" fill="#1f2328" text-anchor="middle">gemini-* → vertex_gemini</text>
+<text x="122" y="229" font-family="system-ui,sans-serif" font-size="10" fill="#57606a" text-anchor="middle">Gemini on Vertex AI</text>
+<rect x="254" y="192" width="212" height="48" rx="6" fill="#ffffff" stroke="#0F6E56"/>
+<text x="360" y="212" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10.5" fill="#1f2328" text-anchor="middle">claude-* → vertex_claude</text>
+<text x="360" y="229" font-family="system-ui,sans-serif" font-size="10" fill="#57606a" text-anchor="middle">Claude on Vertex AI</text>
+<rect x="492" y="192" width="212" height="48" rx="6" fill="#ffffff" stroke="#B22B2B"/>
+<text x="598" y="212" font-family="system-ui,sans-serif" font-size="11" font-weight="600" fill="#B22B2B" text-anchor="middle">anything else → 404</text>
+<text x="598" y="229" font-family="system-ui,sans-serif" font-size="10" fill="#57606a" text-anchor="middle">no provider is called</text>
+<line x1="360" y1="156" x2="360" y2="188" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmI)"/>
+<polyline points="320,156 320,172 122,172 122,188" fill="none" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmI)"/>
+<polyline points="400,156 400,172 598,172 598,188" fill="none" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmI)"/>
+</svg>
+<figcaption>Envoy picks a route before the body arrives. Clearing the route cache after AIPM has read the model makes it pick again, and this time the model can decide.</figcaption>
+</figure>
+
 - **The catch-all route must also declare `request:`**: Envoy picks a route before the body is read, and only an AI endpoint gets its body parsed.
 - **`clear_route_cache: true`**, after AIPM, makes Envoy pick the route again once the model is known. A model no backend serves gets the 404 without calling any provider.
 
 ## Egress through a forward proxy
 
 One route, no per-provider config. The request's Host picks the destination: clients set `HTTP_PROXY=http://localhost:10000` and use an `http://` base URL, and Envoy originates TLS. Full config: [egress.yaml](https://github.com/botengyao/botengyao.github.io/blob/main/examples/ai-protocol-manager/configs/egress.yaml).
+
+<figure>
+<svg width="100%" viewBox="0 0 720 200" role="img" xmlns="http://www.w3.org/2000/svg" style="max-width:720px">
+<title>Egress through a dynamic forward proxy</title>
+<desc>A client with HTTP_PROXY set sends plain HTTP to Envoy. The AI Protocol Manager on the listener detects the API from the path, a header or the body, then validates and describes the request. The dynamic forward proxy resolves the request's Host. The AI Protocol Manager on the cluster reads token usage on each attempt, detecting the API from the response. The cluster's TLS takes its SNI and SAN check from the Host, so one route reaches api.openai.com, api.anthropic.com or generativelanguage.googleapis.com.</desc>
+<defs>
+<marker id="aipmJ" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#57606a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+</defs>
+<rect x="1" y="1" width="718" height="198" rx="10" fill="#ffffff" stroke="#d0d7de"/>
+<rect x="12" y="58" width="102" height="72" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="63" y="82" font-family="system-ui,sans-serif" font-size="12.5" font-weight="600" fill="#1f2328" text-anchor="middle">Client</text>
+<text x="63" y="100" font-family="system-ui,sans-serif" font-size="10" fill="#57606a" text-anchor="middle">HTTP_PROXY set,</text>
+<text x="63" y="115" font-family="system-ui,sans-serif" font-size="10" fill="#57606a" text-anchor="middle">http:// base URL</text>
+<rect x="124" y="14" width="448" height="172" rx="10" fill="#ffffff" stroke="#0F6E56" stroke-width="1.5"/>
+<text x="140" y="36" font-family="system-ui,sans-serif" font-size="13" font-weight="600" fill="#085041">Envoy</text>
+<rect x="140" y="52" width="148" height="84" rx="6" fill="#E1F5EE" stroke="#0F6E56"/>
+<text x="214" y="72" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#085041" text-anchor="middle">AIPM</text>
+<text x="214" y="92" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328" text-anchor="middle">detects the API from</text>
+<text x="214" y="108" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328" text-anchor="middle">path, header or body,</text>
+<text x="214" y="124" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328" text-anchor="middle">validates, describes</text>
+<rect x="304" y="52" width="104" height="84" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="356" y="72" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#1f2328" text-anchor="middle">DFP</text>
+<text x="356" y="92" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328" text-anchor="middle">resolves the</text>
+<text x="356" y="108" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328" text-anchor="middle">request's Host</text>
+<rect x="424" y="52" width="132" height="84" rx="6" fill="#E1F5EE" stroke="#0F6E56"/>
+<text x="490" y="72" font-family="system-ui,sans-serif" font-size="11.5" font-weight="600" fill="#085041" text-anchor="middle">AIPM on the cluster</text>
+<text x="490" y="92" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328" text-anchor="middle">token usage on</text>
+<text x="490" y="108" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328" text-anchor="middle">each attempt, API</text>
+<text x="490" y="124" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328" text-anchor="middle">from the response</text>
+<text x="348" y="164" font-family="system-ui,sans-serif" font-size="10.5" fill="#57606a" text-anchor="middle">cluster TLS: auto_sni and auto_san_validation follow the Host</text>
+<rect x="588" y="40" width="116" height="108" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="646" y="60" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#1f2328" text-anchor="middle">the Host</text>
+<text x="646" y="80" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9" fill="#1f2328" text-anchor="middle">api.openai.com</text>
+<text x="646" y="96" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9" fill="#1f2328" text-anchor="middle">api.anthropic.com</text>
+<text x="646" y="112" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9" fill="#1f2328" text-anchor="middle">generativelanguage</text>
+<text x="646" y="125" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9" fill="#1f2328" text-anchor="middle">.googleapis.com</text>
+<line x1="114" y1="94" x2="136" y2="94" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmJ)"/>
+<line x1="288" y1="94" x2="300" y2="94" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmJ)"/>
+<line x1="408" y1="94" x2="420" y2="94" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmJ)"/>
+<line x1="556" y1="94" x2="584" y2="94" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmJ)"/>
+</svg>
+<figcaption>One route for every provider. The Host decides where the request goes, the listener's AIPM works out which API it is, and the cluster's AIPM reads usage from whichever provider answered.</figcaption>
+</figure>
 
 ```yaml
 routes:
