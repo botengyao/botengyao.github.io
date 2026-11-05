@@ -1,7 +1,7 @@
 # AI Protocol Manager examples
 
 Configs for Envoy's AI Protocol Manager. Each one is run by an integration test on a real Envoy
-against mock providers. Written against Envoy main at `5d3b0dcaf4` (2026-10-26); the AI Protocol
+against mock providers. Written against Envoy main at `36230011ce` (2026-11-05); the AI Protocol
 Manager API is work in progress, so expect changes.
 
 - `configs/observe.yaml`: the native OpenAI (Chat Completions, Responses), Anthropic and Gemini

@@ -176,6 +176,14 @@ class ObserveTest(ExampleTest):
         self.assertEqual(self.envoy.counter("ai_protocol_manager.request_parse_error"), 1)
         self.assertEqual(self.envoy.counter("ai_protocol_manager.schema_validation.invalid"), 3)
 
+    def test_model_must_stay_inline(self):
+        # Past inline_string_threshold_bytes a string stays in the buffer, and the schema only lets
+        # message text do that.
+        status, _, payload = self.chat("/v1/chat/completions", "m" * 2048, headers={"authorization": "Bearer k"})
+        self.assertEqual(status, 400, payload)
+        self.assertIn(b"field 'model' cannot be offloaded to external buffer", payload)
+        self.assertEqual(self.mock.requests, [])
+
 
 class GatewayTest(ExampleTest):
     """configs/gateway.yaml: any client API to any backend, one route each."""
@@ -196,6 +204,22 @@ class GatewayTest(ExampleTest):
         for log in self.envoy.access_logs(2):
             self.assertEqual(log["upstream_path"], "/v1/messages")
             self.assert_usage(log, "ANTHROPIC_MESSAGES")
+
+    def test_long_text_is_copied_as_received(self):
+        # The prompt is far over the inline threshold, so the transcoder moves a reference to it
+        # and the serializer copies its bytes from the buffer, escapes and all.
+        prompt = "Café \"quoted\"\n" * 200_000
+        sent = json.dumps({"model": "claude-sonnet-4-5",
+                           "messages": [{"role": "system", "content": "Café."},
+                                        {"role": "user", "content": prompt}]}).encode()
+        status, _, payload = self.envoy.post("/claude/v1/chat/completions", sent)
+        self.assert_openai_reply(status, payload, "claude-sonnet-4-5", "Hello from Claude.", stream=False)
+        upstream = self.mock.only_request()
+        self.assertEqual(upstream.body["messages"][0]["content"], prompt)
+        self.assertEqual(int(upstream.headers["content-length"]), len(upstream.raw))
+        self.assertIn(json.dumps(prompt).encode(), upstream.raw)
+        # An inline string is written fresh from the DOM.
+        self.assertIn('"system":"Café."'.encode(), upstream.raw)
 
     def test_retry_resends_the_transcoded_body(self):
         self.mock.failures = [503]

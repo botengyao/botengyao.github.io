@@ -42,12 +42,11 @@ static_resources:
                   retry_policy: {retry_on: 5xx, num_retries: 1}
                 request_headers_to_add: &anthropic_key
                 - header: {key: x-api-key, value: "%ENVIRONMENT(ANTHROPIC_API_KEY)%"}
-                - header: {key: anthropic-version, value: "2023-06-01"}
                 typed_per_filter_config:
                   envoy.filters.http.ai_protocol_manager:
                     "@type": type.googleapis.com/envoy.extensions.filters.http.ai_protocol_manager.v3.AiProtocolManagerPerRoute
                     request: {llm_protocol: OPENAI_CHAT_COMPLETIONS}
-                    response: {llm_protocol: ANTHROPIC_MESSAGES, binding: {uri_pattern: /v1/messages}}
+                    response: {llm_protocol: ANTHROPIC_MESSAGES}
               # Google GenAI clients -> Claude. The prefix is the gateway's, so the route says
               # where the model sits in the client's path.
               - match: {prefix: /claude/v1beta/models/}
@@ -64,8 +63,8 @@ static_resources:
                     request:
                       llm_protocol: GEMINI_GENERATE_CONTENT
                       binding: {uri_pattern: "/claude/v1beta/models/{model}:{generateContent|streamGenerateContent?alt=sse}"}
-                    response: {llm_protocol: ANTHROPIC_MESSAGES, binding: {uri_pattern: /v1/messages}}
-              # OpenAI clients -> Gemini. Gemini's own path needs no binding.
+                    response: {llm_protocol: ANTHROPIC_MESSAGES}
+              # OpenAI clients -> Gemini.
               - match: {path: /gemini/v1/chat/completions}
                 route: {cluster: gemini, auto_host_rewrite: true}
                 request_headers_to_add: &gemini_key
@@ -118,9 +117,11 @@ static_resources:
                       llm_protocol: ANTHROPIC_MESSAGES
                       binding:
                         uri_pattern: "/v1/projects/my-project/locations/us-east5/publishers/anthropic/models/{model}:{rawPredict|streamRawPredict}"
-                        mutations:
-                        - {body_field: model}
-                        - {body_field: anthropic_version, value: vertex-2023-10-16, keep_existing: true}
+                        body_mutations:
+                        - remove: model
+                        - append: {record: {key: anthropic_version, value: vertex-2023-10-16}, action: ADD_IF_ABSENT}
+                        header_mutations:
+                        - remove: anthropic-version
               # OpenAI clients -> Gemini on Vertex AI: a path is enough.
               - match: {path: /vertex/gemini/v1/chat/completions}
                 route: {cluster: vertex, auto_host_rewrite: true}

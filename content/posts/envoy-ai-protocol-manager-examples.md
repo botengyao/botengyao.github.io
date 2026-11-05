@@ -6,7 +6,9 @@ tags: ["envoy", "ai-gateway", "llm", "protocols"]
 summary: "How Envoy's AI Protocol Manager handles LLM traffic today, and a set of tested configs: observing native APIs, translating between OpenAI, Claude and Gemini (Vertex AI included), retries and failover across APIs, a forward-proxy egress, and model routing with ext_proc."
 ---
 
-The AI Protocol Manager (AIPM) is Envoy's filter for LLM API traffic. It parses the request body, runs small AI filters over it, can turn one vendor's API into another's, and reads token usage off the response. It is alpha and moving fast, so this page pins down how it works on Envoy main today (`5d3b0dcaf4`, October 26, 2026) and collects configs for the setups I keep getting asked about.
+The AI Protocol Manager (AIPM) is Envoy's filter for LLM API traffic. It parses the request body, runs small AI filters over it, can turn one vendor's API into another's, and reads token usage off the response. It is alpha and moving fast, so this page pins down how it works on Envoy main today (`36230011ce`, November 5, 2026) and collects configs for the setups I keep getting asked about.
+
+*Updated November 5 for main at `36230011ce`. Bindings now edit headers as well as the body, with new field names. Anthropic's path and version header are built in, and `set_filter_state` runs on clusters, which retires the Lua workaround. There is also a new section on [how AIPM holds and parses the body](#inside-aipm-the-buffer-the-dom-and-the-schema).*
 
 Every config here runs in an integration test: a real Envoy, mock OpenAI, Anthropic, Gemini and Vertex AI backends that refuse what the real APIs refuse, and an ext_proc server for the routing example. The [configs and tests](https://github.com/botengyao/botengyao.github.io/tree/main/examples/ai-protocol-manager) live next to this blog. The snippets below keep only the part that matters; the linked files are complete.
 
@@ -27,7 +29,7 @@ Every config here runs in an integration test: a real Envoy, mock OpenAI, Anthro
 <text x="136" y="36" font-family="system-ui,sans-serif" font-size="13" font-weight="600" fill="#085041">Envoy</text>
 <rect x="136" y="48" width="320" height="196" rx="6" fill="#E1F5EE" stroke="#0F6E56"/>
 <text x="150" y="70" font-family="system-ui,sans-serif" font-size="12.5" font-weight="600" fill="#085041">AI Protocol Manager</text>
-<text x="150" y="86" font-family="system-ui,sans-serif" font-size="10.5" fill="#57606a">only on routes that declare request:</text>
+<text x="150" y="86" font-family="system-ui,sans-serif" font-size="10.5" fill="#57606a">only on declared AI endpoints</text>
 <text x="150" y="110" font-family="system-ui,sans-serif" font-size="11" fill="#1f2328">1  hold headers, parse the body (bad JSON → 400)</text>
 <text x="150" y="130" font-family="system-ui,sans-serif" font-size="11" fill="#1f2328">2  schema_validation</text>
 <text x="150" y="150" font-family="system-ui,sans-serif" font-size="11" fill="#1f2328">3  request_info → envoy.ai.request_info</text>
@@ -53,9 +55,9 @@ Every config here runs in an integration test: a real Envoy, mock OpenAI, Anthro
 <figcaption>A declared AI endpoint has its body parsed once and handed to the AI filters. The router and everything after it see a normal request in the backend's API.</figcaption>
 </figure>
 
-**A route opts in.** Per-route config with `request:` makes a route an AI endpoint and names the API its clients speak. Every other route passes straight through: no buffering, no parsing.
+**A route opts in, or a filter does.** Per-route config with `request:` makes a route an AI endpoint and names the API its clients speak. A filter ahead of AIPM can do the same for a single JSON request by naming the API in `envoy.ai.llm_protocol.request` filter state. Everything else passes straight through: no buffering, no parsing.
 
-**The body is parsed before the headers move on.** On an AI endpoint, AIPM holds the headers, offloads the body as it arrives, and parses it as JSON. Bad JSON gets a 400 right there. Then the AI filters run, in order, on the parsed document:
+**The body is parsed before the headers move on.** On an AI endpoint, AIPM holds the headers, buffers the body as it arrives, and parses it as JSON ([how](#inside-aipm-the-buffer-the-dom-and-the-schema)). Bad JSON gets a 400 right there. Then the AI filters run, in order, on the parsed document:
 
 - `schema_validation` checks the body against its API's schema.
 - `request_info` publishes the model, the streaming flag, the token cap and the message and tool counts as typed metadata (`envoy.ai.request_info`), and the model as filter state (`envoy.ai.model.request`). With `token_estimation` it also estimates input tokens from the body size.
@@ -69,11 +71,11 @@ Then the document is written back into the body and the headers continue down th
 
 - `envoy.ai.llm_protocol.request`: the client's API.
 - `envoy.ai.llm_protocol.response`: the backend's API.
-- `envoy.ai.binding.response`: how the backend carries its API on HTTP. It is either a path pattern such as `/v1beta/models/{model}:{generateContent|streamGenerateContent?alt=sse}`, or a JSON binding that also edits the body.
+- `envoy.ai.binding.response`: how the backend carries its API on HTTP. It is either a path pattern such as `/v1beta/models/{model}:{generateContent|streamGenerateContent?alt=sse}`, or a JSON binding that also edits the body and headers.
 - `envoy.ai.binding.request`: the same for the client's side.
 - `envoy.ai.model.resolved`: the model to send instead of the one the client asked for.
 
-Anything that writes filter state can set these: `set_filter_state`, Lua, or ext_proc through headers.
+Anything that writes filter state can set these: `set_filter_state` (on the listener or on a cluster), Lua, or ext_proc through headers.
 
 **It runs on the listener or on the cluster.** In `http_filters` it runs once per request. In a cluster's `http_filters`, or the router's `upstream_http_filters`, it runs once per attempt, after Envoy picks the cluster and host, and still sees the request's filter state.
 
@@ -87,6 +89,7 @@ Anything that writes filter state can set these: `set_filter_state`, Lua, or ext
 - [Several backends](#several-backends-split-failover-by-model): split traffic, fail over to another API with a composite cluster or a cluster specifier, and route by model.
 - [Egress through a forward proxy](#egress-through-a-forward-proxy): any provider, no per-provider config.
 - [Routing decisions outside Envoy](#routing-decisions-outside-envoy): ext_proc picks the backend and keeps a token budget.
+- [Inside AIPM](#inside-aipm-the-buffer-the-dom-and-the-schema): how the buffer, the DOM and the schema work together, and what ext_proc gets.
 - [Gaps on main](#gaps-on-main): what didn't work and why.
 
 ## Observe native APIs
@@ -188,11 +191,11 @@ One filter chain serves every route. The base URL picks the backend and the path
 
 | Base URL | Client | Backend | Needs, besides the two APIs |
 |---|---|---|---|
-| `/claude/v1` | OpenAI SDK | Claude | backend path |
+| `/claude/v1` | OpenAI SDK | Claude | nothing |
 | `/gemini/v1` | OpenAI SDK | Gemini | nothing |
 | `/gemini` | Claude Code | Gemini | model |
 | `/openai` | Claude Code | OpenAI-compatible | backend path, model |
-| `/claude` | Gemini SDK | Claude | client path, backend path, model |
+| `/claude` | Gemini SDK | Claude | client path, model |
 | `/vertex/claude/v1` | OpenAI SDK | Claude on Vertex AI | backend path with body edits |
 | `/vertex/gemini/v1` | OpenAI SDK | Gemini on Vertex AI | backend path |
 | `/v1` | Claude Code on Vertex AI | Gemini on Vertex AI | backend path, model |
@@ -237,7 +240,7 @@ Credentials belong to the gateway. The virtual host strips whatever the client s
 <figure>
 <svg width="100%" viewBox="0 0 720 336" role="img" xmlns="http://www.w3.org/2000/svg" style="max-width:720px">
 <title>One request from the OpenAI SDK to Claude</title>
-<desc>The client sends an OpenAI Chat request to /claude/v1/chat/completions with its own key. Envoy drops the client's key and adds Claude's, the first transcoder keeps OpenAI Chat as is, the second writes Anthropic Messages, the binding sets the path to /v1/messages, and the host is rewritten to Claude's. Claude receives a Messages request with a top-level system field and max_tokens. Claude's answer, with its usage, is read for token usage and converted back into an OpenAI chat completion.</desc>
+<desc>The client sends an OpenAI Chat request to /claude/v1/chat/completions with its own key. Envoy drops the client's key and adds Claude's, the first transcoder keeps OpenAI Chat as is, the second writes Anthropic Messages, Anthropic's built-in binding sets the path to /v1/messages and adds the version header, and the host is rewritten to Claude's. Claude receives a Messages request with a top-level system field and max_tokens. Claude's answer, with its usage, is read for token usage and converted back into an OpenAI chat completion.</desc>
 <defs>
 <marker id="aipmE" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#57606a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
 </defs>
@@ -252,10 +255,10 @@ Credentials belong to the gateway. The virtual host strips whatever the client s
 <rect x="246" y="32" width="228" height="180" rx="6" fill="#E1F5EE" stroke="#0F6E56"/>
 <text x="258" y="52" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#085041">Envoy</text>
 <text x="258" y="74" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328">virtual host: drop the client's key</text>
-<text x="258" y="92" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328">route: add Claude's key and version</text>
+<text x="258" y="92" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328">route: add Claude's key</text>
 <text x="258" y="110" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328">transcoder 1: OpenAI Chat as is</text>
 <text x="258" y="128" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328">transcoder 2: → Anthropic Messages</text>
-<text x="258" y="146" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328">binding: path → /v1/messages</text>
+<text x="258" y="146" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328">its binding: /v1/messages, version</text>
 <text x="258" y="164" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328">auto_host_rewrite: Claude's host</text>
 <rect x="494" y="32" width="210" height="180" rx="6" fill="#ffffff" stroke="#d0d7de"/>
 <text x="506" y="52" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#1f2328">Claude receives&#160;<tspan font-weight="400" fill="#57606a">Messages</tspan></text>
@@ -296,16 +299,15 @@ Credentials belong to the gateway. The virtual host strips whatever the client s
   route: {cluster: anthropic, auto_host_rewrite: true}
   request_headers_to_add:
   - header: {key: x-api-key, value: "%ENVIRONMENT(ANTHROPIC_API_KEY)%"}
-  - header: {key: anthropic-version, value: "2023-06-01"}
   typed_per_filter_config:
     envoy.filters.http.ai_protocol_manager:
       "@type": type.googleapis.com/envoy.extensions.filters.http.ai_protocol_manager.v3.AiProtocolManagerPerRoute
       request: {llm_protocol: OPENAI_CHAT_COMPLETIONS}
-      response: {llm_protocol: ANTHROPIC_MESSAGES, binding: {uri_pattern: /v1/messages}}
+      response: {llm_protocol: ANTHROPIC_MESSAGES}
 ```
 
 - **`response.llm_protocol`** tells the second transcoder to write Anthropic Messages, and tells token usage to read Anthropic's format.
-- **`binding: {uri_pattern: /v1/messages}`**: the transcoder rewrites the body but leaves the path alone unless a binding names one. Without it, Claude gets a Messages body at `/claude/v1/chat/completions` and answers 404. Only Gemini has a built-in path, because its path carries the model.
+- **No binding.** The transcoder writes the request in the backend API's own binding unless the route names another. Anthropic's puts it at `/v1/messages` and adds `anthropic-version: 2023-06-01` when the client sent none. Gemini has one too. OpenAI Chat doesn't, so an OpenAI backend needs `binding: {uri_pattern: /v1/chat/completions}`, or it gets the client's path and answers 404.
 
 ### OpenAI SDK to Gemini
 
@@ -348,7 +350,7 @@ For an OpenAI-compatible backend (OpenAI, vLLM, …), the route at `/openai/v1/m
 request:
   llm_protocol: GEMINI_GENERATE_CONTENT
   binding: {uri_pattern: "/claude/v1beta/models/{model}:{generateContent|streamGenerateContent?alt=sse}"}
-response: {llm_protocol: ANTHROPIC_MESSAGES, binding: {uri_pattern: /v1/messages}}
+response: {llm_protocol: ANTHROPIC_MESSAGES}
 ```
 
 - **`request.binding`**: Gemini puts the model and the streaming mode in the path. Envoy knows Gemini's own path and Vertex AI's, but not your prefix, so this pattern says where `{model}` sits. `{generateContent|streamGenerateContent?alt=sse}` reads `stream`. `maxOutputTokens` becomes `max_tokens`.
@@ -371,15 +373,17 @@ OpenAI clients to Claude on Vertex AI:
         llm_protocol: ANTHROPIC_MESSAGES
         binding:
           uri_pattern: "/v1/projects/my-project/locations/us-east5/publishers/anthropic/models/{model}:{rawPredict|streamRawPredict}"
-          mutations:
-          - {body_field: model}
-          - {body_field: anthropic_version, value: vertex-2023-10-16, keep_existing: true}
+          body_mutations:
+          - remove: model
+          - append: {record: {key: anthropic_version, value: vertex-2023-10-16}, action: ADD_IF_ABSENT}
+          header_mutations:
+          - remove: anthropic-version
 ```
 
 <figure>
 <svg width="100%" viewBox="0 0 720 264" role="img" xmlns="http://www.w3.org/2000/svg" style="max-width:720px">
 <title>How a binding renders a Vertex AI request</title>
-<desc>The second transcoder writes an Anthropic Messages body with model and stream. The binding's pattern takes the model from the body into the path, and stream picks rawPredict or streamRawPredict. The first mutation removes model from the body, and the second adds anthropic_version. Vertex AI receives a POST to the streamRawPredict path for the model, with anthropic_version, stream, messages and max_tokens in the body.</desc>
+<desc>The second transcoder writes an Anthropic Messages body with model and stream. The binding's pattern takes the model from the body into the path, and stream picks rawPredict or streamRawPredict. The first body mutation removes model from the body, the second adds anthropic_version, and the header mutation drops the anthropic-version header. Vertex AI receives a POST to the streamRawPredict path for the model, with anthropic_version, stream, messages and max_tokens in the body.</desc>
 <rect x="1" y="1" width="718" height="262" rx="10" fill="#ffffff" stroke="#d0d7de"/>
 <text x="16" y="22" font-family="system-ui,sans-serif" font-size="11" font-weight="600" fill="#1f2328">1  transcoder 2 writes Anthropic Messages</text>
 <rect x="16" y="30" width="688" height="34" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
@@ -387,8 +391,8 @@ OpenAI clients to Claude on Vertex AI:
 <text x="16" y="90" font-family="system-ui,sans-serif" font-size="11" font-weight="600" fill="#1f2328">2  the binding renders the path and edits the body</text>
 <rect x="16" y="98" width="688" height="68" rx="6" fill="#E1F5EE" stroke="#0F6E56"/>
 <text x="28" y="119" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10.5" fill="#1f2328">uri_pattern: /v1/projects/…/publishers/anthropic/models/<tspan fill="#0F6E56" font-weight="600">{model}</tspan>:<tspan fill="#9A6700" font-weight="600">{rawPredict|streamRawPredict}</tspan></text>
-<text x="28" y="138" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10.5" fill="#1f2328">mutations:&#160;<tspan fill="#0F6E56" font-weight="600">{body_field: model}</tspan>,&#160;<tspan fill="#0969DA" font-weight="600">{body_field: anthropic_version, value: vertex-2023-10-16}</tspan></text>
-<text x="28" y="157" font-family="system-ui,sans-serif" font-size="10.5" fill="#57606a">{model} takes the body's model, and the first mutation removes it from the body. stream picks the method and stays.</text>
+<text x="28" y="138" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10.5" fill="#1f2328">body_mutations:&#160;<tspan fill="#0F6E56" font-weight="600">remove: model</tspan>,&#160;<tspan fill="#0969DA" font-weight="600">append: {record: {key: anthropic_version, value: vertex-2023-10-16}}</tspan></text>
+<text x="28" y="157" font-family="system-ui,sans-serif" font-size="10.5" fill="#57606a">{model} is read from the body before the mutation removes it. stream picks the method and stays in the body.</text>
 <text x="16" y="190" font-family="system-ui,sans-serif" font-size="11" font-weight="600" fill="#1f2328">3  Vertex AI receives</text>
 <rect x="16" y="198" width="688" height="52" rx="6" fill="#ffffff" stroke="#0F6E56" stroke-width="1.5"/>
 <text x="28" y="219" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10.5" fill="#1f2328">POST /v1/projects/…/publishers/anthropic/models/<tspan fill="#0F6E56" font-weight="600">claude-sonnet-4-5@20250929</tspan>:<tspan fill="#9A6700" font-weight="600">streamRawPredict</tspan></text>
@@ -397,7 +401,8 @@ OpenAI clients to Claude on Vertex AI:
 <figcaption>A binding maps between the body and the path. On the client side it works the other way: it reads the model and the method out of the path, as in the Claude Code on Vertex AI route below.</figcaption>
 </figure>
 
-- Claude on Vertex AI speaks Anthropic Messages, but it takes the model in the path and needs `anthropic_version` in the body. The two **`mutations`** remove `model` and add the version. The method follows `stream`.
+- Claude on Vertex AI speaks Anthropic Messages, but it takes the model in the path and the version in the body. **`body_mutations`** remove `model` and add `anthropic_version`. The method follows `stream`.
+- **`header_mutations`**: a binding's edits go on top of the API's own, so Anthropic's `anthropic-version` header would still be added. Naming it turns it off.
 - Gemini on Vertex AI needs only the pattern (`.../publishers/google/models/{model}:{generateContent|streamGenerateContent?alt=sse}`). Gemini's own edits still apply.
 - The token comes from `gcloud auth print-access-token` here. In production, let the gcp_authn filter fetch it.
 
@@ -524,28 +529,16 @@ The router's upstream filters turn that metadata into the AIPM's instructions on
 
 ```yaml
 upstream_http_filters:          # every cluster without filters of its own
-- name: envoy.filters.http.header_mutation
+- name: envoy.filters.http.set_filter_state
   typed_config:
-    "@type": type.googleapis.com/envoy.extensions.filters.http.header_mutation.v3.HeaderMutation
-    mutations:
-      request_mutations:
-      - append: {header: {key: x-ai-api, value: "%UPSTREAM_METADATA(envoy.ai:api)%"}, append_action: OVERWRITE_IF_EXISTS_OR_ADD}
-      - append: {header: {key: x-ai-binding, value: "%UPSTREAM_METADATA(envoy.ai:binding)%"}, append_action: OVERWRITE_IF_EXISTS_OR_ADD}
-      - append: {header: {key: x-ai-model, value: "%UPSTREAM_METADATA(envoy.ai:model)%"}, append_action: OVERWRITE_IF_EXISTS_OR_ADD}
-- name: envoy.filters.http.lua
-  typed_config:
-    "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
-    default_source_code:
-      inline_string: |
-        function envoy_on_request(handle)
-          local state = handle:streamInfo():filterState()
-          for header, key in pairs({["x-ai-api"] = "envoy.ai.llm_protocol.response",
-                                    ["x-ai-binding"] = "envoy.ai.binding.response",
-                                    ["x-ai-model"] = "envoy.ai.model.resolved"}) do
-            state:set(key, key, handle:headers():get(header))
-            handle:headers():remove(header)
-          end
-        end
+    "@type": type.googleapis.com/envoy.extensions.filters.http.set_filter_state.v3.Config
+    on_request_headers:
+    - object_key: envoy.ai.llm_protocol.response
+      format_string: {text_format_source: {inline_string: "%UPSTREAM_METADATA(envoy.ai:api)%"}}
+    - object_key: envoy.ai.binding.response
+      format_string: {text_format_source: {inline_string: "%UPSTREAM_METADATA(envoy.ai:binding)%"}}
+    - object_key: envoy.ai.model.resolved
+      format_string: {text_format_source: {inline_string: "%UPSTREAM_METADATA(envoy.ai:model)%"}}
 - name: envoy.filters.http.ai_protocol_manager
   typed_config:
     "@type": type.googleapis.com/envoy.extensions.filters.http.ai_protocol_manager.v3.AiProtocolManager
@@ -563,13 +556,13 @@ upstream_http_filters:          # every cluster without filters of its own
 ```
 
 <figure>
-<svg width="100%" viewBox="0 0 720 288" role="img" xmlns="http://www.w3.org/2000/svg" style="max-width:720px">
-<title>Three values relayed from the picked host to the AI Protocol Manager</title>
-<desc>On each attempt, the picked host's envoy.ai metadata holds the backend's API, its binding and its model. header_mutation copies them into the x-ai-api, x-ai-binding and x-ai-model headers using UPSTREAM_METADATA. Lua moves each header into filter state: envoy.ai.llm_protocol.response, envoy.ai.binding.response and envoy.ai.model.resolved. The AI Protocol Manager then writes that API, renders that path and sends that model.</desc>
+<svg width="100%" viewBox="0 0 720 222" role="img" xmlns="http://www.w3.org/2000/svg" style="max-width:720px">
+<title>Three values from the picked host to the AI Protocol Manager</title>
+<desc>On each attempt, the picked host's envoy.ai metadata holds the backend's API, its binding and its model. set_filter_state on the cluster formats each with UPSTREAM_METADATA into a filter state object: envoy.ai.llm_protocol.response, envoy.ai.binding.response and envoy.ai.model.resolved. The AI Protocol Manager then writes that API, renders that path and sends that model.</desc>
 <defs>
 <marker id="aipmH" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#57606a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
 </defs>
-<rect x="1" y="1" width="718" height="286" rx="10" fill="#ffffff" stroke="#d0d7de"/>
+<rect x="1" y="1" width="718" height="220" rx="10" fill="#ffffff" stroke="#d0d7de"/>
 <text x="248" y="22" font-family="system-ui,sans-serif" font-size="10.5" font-weight="600" fill="#57606a" text-anchor="middle">the backend's API</text>
 <text x="436" y="22" font-family="system-ui,sans-serif" font-size="10.5" font-weight="600" fill="#57606a" text-anchor="middle">how it carries it on HTTP</text>
 <text x="618" y="22" font-family="system-ui,sans-serif" font-size="10.5" font-weight="600" fill="#57606a" text-anchor="middle">the model to send</text>
@@ -583,51 +576,38 @@ upstream_http_filters:          # every cluster without filters of its own
 <text x="436" y="58" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10" fill="#1f2328" text-anchor="middle">binding: "/v1/projects/…"</text>
 <text x="618" y="58" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10" fill="#1f2328" text-anchor="middle">model: gemini-2.5-flash</text>
 <rect x="16" y="98" width="128" height="44" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
-<text x="80" y="116" font-family="system-ui,sans-serif" font-size="11.5" font-weight="600" fill="#1f2328" text-anchor="middle">header_mutation</text>
+<text x="80" y="116" font-family="system-ui,sans-serif" font-size="11.5" font-weight="600" fill="#1f2328" text-anchor="middle">set_filter_state</text>
 <text x="80" y="132" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9" fill="#57606a" text-anchor="middle">%UPSTREAM_METADATA%</text>
 <rect x="156" y="98" width="184" height="44" rx="6" fill="#ffffff" stroke="#d0d7de"/>
 <rect x="352" y="98" width="168" height="44" rx="6" fill="#ffffff" stroke="#d0d7de"/>
 <rect x="532" y="98" width="172" height="44" rx="6" fill="#ffffff" stroke="#d0d7de"/>
-<text x="248" y="124" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10" fill="#1f2328" text-anchor="middle">x-ai-api</text>
-<text x="436" y="124" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10" fill="#1f2328" text-anchor="middle">x-ai-binding</text>
-<text x="618" y="124" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10" fill="#1f2328" text-anchor="middle">x-ai-model</text>
-<rect x="16" y="164" width="128" height="44" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
-<text x="80" y="182" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#1f2328" text-anchor="middle">Lua</text>
-<text x="80" y="198" font-family="system-ui,sans-serif" font-size="10" fill="#57606a" text-anchor="middle">headers → filter state</text>
-<rect x="156" y="164" width="184" height="44" rx="6" fill="#ffffff" stroke="#d0d7de"/>
-<rect x="352" y="164" width="168" height="44" rx="6" fill="#ffffff" stroke="#d0d7de"/>
-<rect x="532" y="164" width="172" height="44" rx="6" fill="#ffffff" stroke="#d0d7de"/>
-<text x="248" y="190" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9.5" fill="#1f2328" text-anchor="middle">envoy.ai.llm_protocol.response</text>
-<text x="436" y="190" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9.5" fill="#1f2328" text-anchor="middle">envoy.ai.binding.response</text>
-<text x="618" y="190" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9.5" fill="#1f2328" text-anchor="middle">envoy.ai.model.resolved</text>
-<rect x="16" y="230" width="128" height="44" rx="6" fill="#E1F5EE" stroke="#0F6E56"/>
-<text x="80" y="248" font-family="system-ui,sans-serif" font-size="11" font-weight="600" fill="#085041" text-anchor="middle">AI Protocol Manager</text>
-<text x="80" y="264" font-family="system-ui,sans-serif" font-size="10" fill="#57606a" text-anchor="middle">on each attempt</text>
-<rect x="156" y="230" width="184" height="44" rx="6" fill="#E1F5EE" stroke="#0F6E56"/>
-<rect x="352" y="230" width="168" height="44" rx="6" fill="#E1F5EE" stroke="#0F6E56"/>
-<rect x="532" y="230" width="172" height="44" rx="6" fill="#E1F5EE" stroke="#0F6E56"/>
-<text x="248" y="256" font-family="system-ui,sans-serif" font-size="11" fill="#085041" text-anchor="middle">writes this API</text>
-<text x="436" y="256" font-family="system-ui,sans-serif" font-size="11" fill="#085041" text-anchor="middle">renders this path</text>
-<text x="618" y="256" font-family="system-ui,sans-serif" font-size="11" fill="#085041" text-anchor="middle">sends this model</text>
+<text x="248" y="124" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9.5" fill="#1f2328" text-anchor="middle">envoy.ai.llm_protocol.response</text>
+<text x="436" y="124" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9.5" fill="#1f2328" text-anchor="middle">envoy.ai.binding.response</text>
+<text x="618" y="124" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9.5" fill="#1f2328" text-anchor="middle">envoy.ai.model.resolved</text>
+<rect x="16" y="164" width="128" height="44" rx="6" fill="#E1F5EE" stroke="#0F6E56"/>
+<text x="80" y="182" font-family="system-ui,sans-serif" font-size="11" font-weight="600" fill="#085041" text-anchor="middle">AI Protocol Manager</text>
+<text x="80" y="198" font-family="system-ui,sans-serif" font-size="10" fill="#57606a" text-anchor="middle">on each attempt</text>
+<rect x="156" y="164" width="184" height="44" rx="6" fill="#E1F5EE" stroke="#0F6E56"/>
+<rect x="352" y="164" width="168" height="44" rx="6" fill="#E1F5EE" stroke="#0F6E56"/>
+<rect x="532" y="164" width="172" height="44" rx="6" fill="#E1F5EE" stroke="#0F6E56"/>
+<text x="248" y="190" font-family="system-ui,sans-serif" font-size="11" fill="#085041" text-anchor="middle">writes this API</text>
+<text x="436" y="190" font-family="system-ui,sans-serif" font-size="11" fill="#085041" text-anchor="middle">renders this path</text>
+<text x="618" y="190" font-family="system-ui,sans-serif" font-size="11" fill="#085041" text-anchor="middle">sends this model</text>
 <line x1="80" y1="76" x2="80" y2="94" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmH)"/>
 <line x1="80" y1="142" x2="80" y2="160" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmH)"/>
-<line x1="80" y1="208" x2="80" y2="226" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmH)"/>
 <line x1="248" y1="76" x2="248" y2="94" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmH)"/>
 <line x1="248" y1="142" x2="248" y2="160" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmH)"/>
-<line x1="248" y1="208" x2="248" y2="226" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmH)"/>
 <line x1="436" y1="76" x2="436" y2="94" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmH)"/>
 <line x1="436" y1="142" x2="436" y2="160" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmH)"/>
-<line x1="436" y1="208" x2="436" y2="226" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmH)"/>
 <line x1="618" y1="76" x2="618" y2="94" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmH)"/>
 <line x1="618" y1="142" x2="618" y2="160" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmH)"/>
-<line x1="618" y1="208" x2="618" y2="226" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmH)"/>
 </svg>
-<figcaption>On every attempt, three values relay from the host Envoy picked to the AI Protocol Manager. header_mutation can read the host but not set filter state, and Lua the other way round, so they hand off through headers that Lua then removes.</figcaption>
+<figcaption>On every attempt, set_filter_state turns what the picked host says about its backend into the AI Protocol Manager's instructions.</figcaption>
 </figure>
 
 - **Endpoint metadata, not cluster config**: a composite cluster runs its own upstream filters for every sub-cluster, so the only thing that identifies the backend on an attempt is the host that was picked. `%UPSTREAM_METADATA%` reads that host's metadata.
-- **header_mutation, then Lua**: `set_filter_state` can't run on a cluster yet, and Lua can't read the host's metadata. `header_mutation` can format `%UPSTREAM_METADATA%`, and Lua can set filter state, so they pass the values along in three headers.
-- **Every endpoint sets all three values.** The filter state survives across attempts, so a value one endpoint left out would be the previous attempt's.
+- **`set_filter_state` on the cluster** runs on every attempt, after the host is picked, so `%UPSTREAM_METADATA%` reads that host. It became an upstream filter after this page first went up; before that, the same took a `header_mutation` and a Lua script passing the values through headers.
+- **Every endpoint sets all three values**, so no attempt runs with half its instructions. A binding with body or header edits is a struct in the metadata, and arrives as JSON.
 - **Token usage on this AIPM** reads the backend that answered. Only the winning attempt publishes.
 
 Then the routes. All of them declare `request: {llm_protocol: OPENAI_CHAT_COMPLETIONS}` (or the client's API) for both AIPMs.
@@ -674,7 +654,7 @@ route:
 ```
 
 - **`refresh_cluster_on_retry`** makes the router ask the specifier again on the retry, and the attempt then runs the new cluster's filters.
-- **Each cluster brings its own key.** A cluster's own `http_filters` replace the router's, so it lists a `header_mutation` that adds its key, followed by the same three filters. It also removes the other provider's key: upstream filters edit the request in place, so a retry starts with whatever the previous attempt added. The test checks that the Gemini attempt carries no `x-api-key`.
+- **Each cluster brings its own key.** A cluster's own `http_filters` replace the router's, so it lists a `header_mutation` that adds its key, followed by the same filters. It also removes what the other provider's attempt added, its key and Anthropic's `anthropic-version`: upstream filters edit the request in place, so a retry starts with whatever the previous attempt left. The test checks that the Gemini attempt carries neither.
 
 **Route by model**: routes can match the model `request_info` reads from the body:
 
@@ -916,12 +896,84 @@ http_filters:
 
 In the test, the PDP has a 10-token budget. The first `smart` request goes to Claude and costs 18 tokens. The next `smart` request goes to Gemini, and an unknown model gets a 400 from the PDP before any provider is called.
 
+## Inside AIPM: the buffer, the DOM and the schema
+
+Everything above works on a parsed request. This is how AIPM holds one, so that a 2 MB prompt isn't copied into every filter, and why the PDP never needs the body.
+
+<figure>
+<svg width="100%" viewBox="0 0 720 300" role="img" xmlns="http://www.w3.org/2000/svg" style="max-width:720px">
+<title>How AIPM holds and parses a request body</title>
+<desc>Each body frame goes both to a buffer, which keeps the bytes exactly as received, and to a streaming parser, which builds a DOM. Strings longer than the inline threshold are not copied into the DOM; their node is a reference to an offset and length in the buffer. The API's schema says which fields may be references: message text may, model, role and type must be inline. The AI filters validate, describe and transcode the DOM, moving references without reading them. The serializer writes the DOM out as JSON and copies each referenced range from the buffer. ext_proc receives the request headers and the request_info record, not the body.</desc>
+<defs>
+<marker id="aipmK" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#57606a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+</defs>
+<rect x="1" y="1" width="718" height="298" rx="10" fill="#ffffff" stroke="#d0d7de"/>
+<rect x="16" y="112" width="92" height="60" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="62" y="138" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#1f2328" text-anchor="middle">body frames</text>
+<text x="62" y="155" font-family="system-ui,sans-serif" font-size="10" fill="#57606a" text-anchor="middle">as they arrive</text>
+<rect x="132" y="20" width="264" height="66" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="144" y="40" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#1f2328">buffer</text>
+<text x="144" y="58" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328">the bytes, exactly as received</text>
+<text x="144" y="75" font-family="system-ui,sans-serif" font-size="10.5" fill="#57606a">memory, external buffer past the limit</text>
+<rect x="132" y="110" width="264" height="112" rx="6" fill="#E1F5EE" stroke="#0F6E56"/>
+<text x="144" y="130" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#085041">parser → DOM</text>
+<text x="144" y="152" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10" fill="#1f2328">{"model": "claude-sonnet-4-5",</text>
+<text x="150" y="168" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10" fill="#1f2328">"messages": [{"role": "user",</text>
+<text x="162" y="184" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10" fill="#1f2328">"content":&#160;<tspan fill="#9A6700" font-weight="600">‹offset, length›</tspan>}]}</text>
+<text x="144" y="208" font-family="system-ui,sans-serif" font-size="10.5" fill="#57606a">strings over 1 KiB stay in the buffer</text>
+<rect x="132" y="240" width="264" height="46" rx="6" fill="#ffffff" stroke="#d0d7de"/>
+<text x="144" y="259" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328"><tspan font-weight="600">schema</tspan>: message text may be a reference;</text>
+<text x="144" y="276" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328">model, role and type must be inline</text>
+<rect x="420" y="110" width="136" height="112" rx="6" fill="#E1F5EE" stroke="#0F6E56"/>
+<text x="432" y="130" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#085041">AI filters</text>
+<text x="432" y="150" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328">validate</text>
+<text x="432" y="166" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328">describe</text>
+<text x="432" y="182" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328">transcode: move</text>
+<text x="432" y="198" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328">references, never</text>
+<text x="432" y="214" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328">read them</text>
+<rect x="580" y="20" width="124" height="96" rx="6" fill="#ffffff" stroke="#0F6E56" stroke-width="1.5"/>
+<text x="592" y="40" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#1f2328">serializer</text>
+<text x="592" y="58" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328">DOM as JSON,</text>
+<text x="592" y="74" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328">references copied</text>
+<text x="592" y="90" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328">from the buffer</text>
+<text x="592" y="106" font-family="system-ui,sans-serif" font-size="10.5" fill="#57606a">→ router</text>
+<rect x="580" y="146" width="124" height="80" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="592" y="166" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#1f2328">ext_proc</text>
+<text x="592" y="184" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328">headers and the</text>
+<text x="592" y="200" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328">request_info record,</text>
+<text x="592" y="216" font-family="system-ui,sans-serif" font-size="10.5" fill="#57606a">no body</text>
+<polyline points="108,132 120,132 120,53 128,53" fill="none" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmK)"/>
+<line x1="108" y1="152" x2="128" y2="152" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmK)"/>
+<line x1="396" y1="166" x2="416" y2="166" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmK)"/>
+<line x1="396" y1="53" x2="576" y2="53" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmK)"/>
+<polyline points="556,140 568,140 568,96 576,96" fill="none" stroke="#57606a" stroke-width="1.4" marker-end="url(#aipmK)"/>
+<polyline points="556,190 576,190" fill="none" stroke="#0F6E56" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#aipmK)"/>
+<line x1="264" y1="240" x2="264" y2="226" stroke="#57606a" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#aipmK)"/>
+</svg>
+<figcaption>Every frame goes to the buffer and the parser at once. The filters and ext_proc work from the DOM, and only the serializer touches the long strings, to copy them.</figcaption>
+</figure>
+
+On an AI endpoint, each body frame goes two ways.
+
+- **The buffer keeps the bytes.** AIPM keeps the body exactly as received. Up to the stream's buffer limit (the listener's, 1 MiB by default) it stays in memory. Past that it goes to the *external buffer*, a per-stream byte store with asynchronous reads and writes, and flow control holds the client back while the store catches up. On main the only external buffer is in memory, and it doesn't cap the size (`external_buffer_config` picks it); the interface is there for one on disk or elsewhere.
+- **The parser builds a DOM, without the long strings.** A streaming JSON parser reads the same frames where they lie. Keys, numbers and short strings go into the DOM. A string longer than `request_handling.limits.inline_string_threshold_bytes`, 1 KiB by default, is not copied: its node is 16 bytes, an offset and a length into the buffered body. A 2 MB prompt costs one node. Bad JSON is a 400, and so is a body of more than 262,144 nodes.
+- **The schema says which strings may stay behind.** Each API's schema marks the fields that may be references: message text, tool arguments and descriptions, image data. Everything else must be inline, so `model`, `role` and `type` are always strings a filter can read. A model name over the threshold fails validation with `field 'model' cannot be offloaded to external buffer`. The transcoder's rules are checked against the same marks when Envoy builds them: a rule may move message text, but may not read it.
+- **The AI filters work on the DOM.** `request_info` reads the model, the stream flag and the token cap from inline fields, and estimates input tokens from the body's size, not its text. The transcoder moves a reference like any other node.
+- **The body is written back from both.** With the default `reserialize_body: ALWAYS`, the serializer writes the DOM as JSON and, at each reference, copies that range from the buffer: still escaped, never decoded. With `DISABLE`, the buffer goes out as received. Content-Length is fixed up, and the held headers move on with the first frame.
+
+The gateway test sends a 4.4 MB body from the OpenAI SDK to Claude, its prompt full of quotes, newlines and `\u00e9` escapes. The prompt reaches Claude inside a Messages body byte for byte as the client escaped it, while the short system prompt next to it is written fresh from the DOM, its `\u00e9` now a plain `é`.
+
+**ext_proc gets a summary of the DOM, not the body.** `request_info` writes its record before AIPM releases the headers, so ext_proc's request-headers message carries it in `metadata_context`. The record is an `envoy.data.ai.v3.RequestInfo` proto, and the PDP reads it off the wire by field number (the model is field 2, the token estimate field 7): no JSON parser and no body. Leave `request_body_mode` at `NONE`. With `BUFFERED`, ext_proc would buffer the body a second time under its own size limit, and the PDP would parse it again. The usage record reaches the PDP the same way, on the trailers.
+
+**One cost to know.** AIPM leaves its final DOM in filter state, with offsets that match the bytes it sent on, but nothing reads it yet. An AIPM on a cluster parses the body again from the router's bytes, so in the multi-backend and PDP setups each request is parsed twice.
+
+Responses use the same pieces. SSE is parsed one event at a time, and an event too big for the stream window goes to the external buffer. Token usage reads the provider's bytes separately, under its own size caps.
+
 ## Gaps on main
 
 These are the things that didn't work as I first wrote them. All of them are on main as of this writing.
 
 - **Schema validation doesn't read bindings.** A Vertex AI body names its model in the path, and validation rejects it with `missing required field: model`. Leave validation out of chains that take Vertex AI clients.
-- **`set_filter_state` doesn't run on a cluster.** It isn't registered as an upstream filter, so per-attempt instructions go through `header_mutation` and Lua.
 - **`auto_sni` doesn't follow `auto_host_rewrite`.** The SNI is taken from the Host before the rewrite applies, so the TLS check fails. Set `sni` and the SAN check on each cluster, as the configs above do.
 - **Upstream filters edit the request in place, and a retry starts from the previous attempt's edits.** That's why clusters remove other providers' keys. It also breaks the client-side transcoder when it runs on the cluster: on a retry it reads the path the first attempt rewrote, and a Gemini SDK client gets a 400 (`missing required field: model`) instead of the retry. Keep the client side on the listener.
 - **The Responses API** gets usage and request info, but no schema or transcoding yet.

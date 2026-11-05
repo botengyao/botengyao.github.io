@@ -103,6 +103,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.gemini(r, m, query)
         if m := VERTEX_CLAUDE_PATH.match(path):
             self.require(r, "authorization", "Bearer ")
+            if "anthropic-version" in r.headers:
+                raise Refused(400, "anthropic-version belongs in the body on Vertex AI")
             self.check_anthropic(r.body, model_in_body=False)
             if r.body.get("anthropic_version") != "vertex-2023-10-16":
                 raise Refused(400, "anthropic_version must be vertex-2023-10-16")

@@ -29,14 +29,11 @@ type backend struct {
 
 var backends = map[string]backend{
 	"smart": {
-		api:     "ANTHROPIC_MESSAGES",
-		binding: "/v1/messages",
-		model:   "claude-sonnet-4-5",
-		host:    "api.anthropic.com",
-		credentials: map[string]string{
-			"x-api-key":         os.Getenv("ANTHROPIC_API_KEY"),
-			"anthropic-version": "2023-06-01",
-		},
+		api:         "ANTHROPIC_MESSAGES",
+		binding:     "/v1/messages",
+		model:       "claude-sonnet-4-5",
+		host:        "api.anthropic.com",
+		credentials: map[string]string{"x-api-key": os.Getenv("ANTHROPIC_API_KEY")},
 	},
 	"fast": {
 		api:         "GEMINI_GENERATE_CONTENT",

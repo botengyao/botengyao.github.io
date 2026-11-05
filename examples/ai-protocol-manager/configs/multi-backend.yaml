@@ -117,32 +117,18 @@ static_resources:
               "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
               # Backend half, on every attempt to a cluster without filters of its own.
               upstream_http_filters:
-              # What the picked endpoint says about its backend...
-              - &backend
-                name: envoy.filters.http.header_mutation
-                typed_config:
-                  "@type": type.googleapis.com/envoy.extensions.filters.http.header_mutation.v3.HeaderMutation
-                  mutations:
-                    request_mutations:
-                    - append: {header: {key: x-ai-api, value: "%UPSTREAM_METADATA(envoy.ai:api)%"}, append_action: OVERWRITE_IF_EXISTS_OR_ADD}
-                    - append: {header: {key: x-ai-binding, value: "%UPSTREAM_METADATA(envoy.ai:binding)%"}, append_action: OVERWRITE_IF_EXISTS_OR_ADD}
-                    - append: {header: {key: x-ai-model, value: "%UPSTREAM_METADATA(envoy.ai:model)%"}, append_action: OVERWRITE_IF_EXISTS_OR_ADD}
-              # ...becomes the AIPM's instructions (set_filter_state cannot run on a cluster).
+              # What the picked endpoint says about its backend becomes the AIPM's instructions.
               - &instructions
-                name: envoy.filters.http.lua
+                name: envoy.filters.http.set_filter_state
                 typed_config:
-                  "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
-                  default_source_code:
-                    inline_string: |
-                      function envoy_on_request(handle)
-                        local state = handle:streamInfo():filterState()
-                        for header, key in pairs({["x-ai-api"] = "envoy.ai.llm_protocol.response",
-                                                  ["x-ai-binding"] = "envoy.ai.binding.response",
-                                                  ["x-ai-model"] = "envoy.ai.model.resolved"}) do
-                          state:set(key, key, handle:headers():get(header))
-                          handle:headers():remove(header)
-                        end
-                      end
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.set_filter_state.v3.Config
+                  on_request_headers:
+                  - object_key: envoy.ai.llm_protocol.response
+                    format_string: {text_format_source: {inline_string: "%UPSTREAM_METADATA(envoy.ai:api)%"}}
+                  - object_key: envoy.ai.binding.response
+                    format_string: {text_format_source: {inline_string: "%UPSTREAM_METADATA(envoy.ai:binding)%"}}
+                  - object_key: envoy.ai.model.resolved
+                    format_string: {text_format_source: {inline_string: "%UPSTREAM_METADATA(envoy.ai:model)%"}}
               - &backend_half
                 name: envoy.filters.http.ai_protocol_manager
                 typed_config:
@@ -174,9 +160,11 @@ static_resources:
                 model: claude-sonnet-4-5@20250929
                 binding:
                   uri_pattern: "/v1/projects/my-project/locations/us-east5/publishers/anthropic/models/{model}:{rawPredict|streamRawPredict}"
-                  mutations:
-                  - {body_field: model}
-                  - {body_field: anthropic_version, value: vertex-2023-10-16, keep_existing: true}
+                  body_mutations:
+                  - remove: model
+                  - append: {record: {key: anthropic_version, value: vertex-2023-10-16}, action: ADD_IF_ABSENT}
+                  header_mutations:
+                  - remove: anthropic-version
     transport_socket: &vertex_tls
       name: envoy.transport_sockets.tls
       typed_config:
@@ -231,8 +219,6 @@ static_resources:
               request_mutations:
               - remove: x-goog-api-key
               - append: {header: {key: x-api-key, value: "%ENVIRONMENT(ANTHROPIC_API_KEY)%"}, append_action: OVERWRITE_IF_EXISTS_OR_ADD}
-              - append: {header: {key: anthropic-version, value: "2023-06-01"}, append_action: OVERWRITE_IF_EXISTS_OR_ADD}
-        - *backend
         - *instructions
         - *backend_half
         - *codec
@@ -271,7 +257,6 @@ static_resources:
               - remove: x-api-key
               - remove: anthropic-version
               - append: {header: {key: x-goog-api-key, value: "%ENVIRONMENT(GEMINI_API_KEY)%"}, append_action: OVERWRITE_IF_EXISTS_OR_ADD}
-        - *backend
         - *instructions
         - *backend_half
         - *codec
