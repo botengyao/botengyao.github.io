@@ -1,7 +1,7 @@
 ---
 title: "A Static Performance Audit of Envoy"
 date: 2026-11-24T10:00:00+08:00
-draft: true
+draft: false
 tags: ["envoy", "performance", "cpp", "tls", "http", "quic"]
 summary: "About 150 places where Envoy's data path does more work than it needs to, found by reading the code: socket syscalls, shared cache lines, small allocations, and a release build with no PGO or LTO."
 ---
