@@ -1,0 +1,25 @@
+{{- with site.Params.homeInfoParams }}
+<article class="first-entry home-info">
+    <header class="entry-header">
+        <h1>{{ .Title | markdownify }}</h1>
+    </header>
+    <div class="entry-content md-content">
+        {{ $opts := dict "display" "block" }}
+        {{ .Content | $.Page.RenderString $opts }}
+    </div>
+    <footer class="entry-footer">
+        {{ partial "social_icons.html" (dict "align" site.Params.homeInfoParams.AlignSocialIconsTo) }}
+    </footer>
+</article>
+{{- end }}
+
+{{- with site.Params.homeTags }}
+<nav class="home-tags" aria-label="Tags">
+    {{- range $tag := . }}
+    {{- with site.GetPage (printf "/tags/%s" (urlize $tag)) }}
+    <a href="{{ .RelPermalink }}">{{ $tag }}<span>{{ len .Pages }}</span></a>
+    {{- end }}
+    {{- end }}
+    <a class="home-tags-all" href="{{ "tags/" | relLangURL }}">All tags →</a>
+</nav>
+{{- end -}}

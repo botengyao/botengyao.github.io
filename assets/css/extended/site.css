@@ -1,0 +1,282 @@
+/* Site look on top of PaperMod: palette, type, and list/post details. */
+:root {
+    --accent: #5b3fd6;
+    --accent-soft: rgba(91, 63, 214, 0.1);
+    --theme: #fcfbf8;
+    --entry: #ffffff;
+    --primary: #1d1c1a;
+    --secondary: #6b6862;
+    --tertiary: #dcd8cf;
+    --content: #2a2926;
+    --code-bg: #f1efe9;
+    --border: #e8e4db;
+    /* Base color of the Catppuccin syntax palette PaperMod bundles. */
+    --code-block-bg: #24273a;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+:root[data-theme="dark"] {
+    --accent: #a99cff;
+    --accent-soft: rgba(169, 156, 255, 0.14);
+    --code-block-bg: #24273a;
+}
+
+body {
+    font-family: var(--font-sans);
+}
+
+code,
+kbd,
+pre,
+samp {
+    font-family: var(--font-mono);
+}
+
+::selection {
+    background: color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+:focus-visible {
+    outline-color: var(--accent);
+}
+
+.header {
+    border-bottom: 1px solid var(--border);
+}
+
+.logo a {
+    font-size: 20px;
+    letter-spacing: -0.01em;
+}
+
+.logo a::before {
+    content: "";
+    width: 0.55em;
+    height: 0.55em;
+    border-radius: 3px;
+    background: var(--accent);
+}
+
+.menu a:hover,
+.menu .active {
+    color: var(--accent);
+}
+
+/* PaperMod paints list pages grey to frame its cards; entries are rows here. */
+.list {
+    background: var(--theme);
+}
+
+.home-info {
+    min-height: 0;
+    margin: 56px 0 32px;
+}
+
+.home-info .entry-content {
+    font-size: 17px;
+}
+
+.post-entry {
+    margin: 0;
+    padding: 22px 0;
+    background: none;
+    border: 0;
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+}
+
+.post-entry:last-of-type {
+    border-bottom: 1px solid var(--border);
+}
+
+.post-entry:hover,
+.post-entry:focus-within {
+    transform: none;
+}
+
+.entry-header h2 {
+    font-size: 22px;
+    letter-spacing: -0.01em;
+    transition: color 0.15s;
+}
+
+.post-entry:hover .entry-header h2 {
+    color: var(--accent);
+}
+
+.entry-content {
+    font-size: 15px;
+}
+
+.entry-footer,
+.post-meta,
+.archive-meta {
+    font-family: var(--font-mono);
+    font-size: 13px;
+}
+
+.breadcrumbs,
+.breadcrumbs a {
+    font-size: 14px;
+}
+
+.post-title {
+    font-size: 38px;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+}
+
+.post-content {
+    line-height: 1.7;
+}
+
+.md-content h2 {
+    margin: 48px auto 16px;
+    font-size: 28px;
+    letter-spacing: -0.015em;
+}
+
+.md-content h3 {
+    margin: 32px 0 12px;
+    font-size: 22px;
+}
+
+.md-content a:not(.anchor) {
+    color: var(--accent);
+    text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 0.2em;
+}
+
+.md-content a:not(.anchor):hover {
+    text-decoration-color: currentColor;
+}
+
+.toc a:hover {
+    color: var(--accent);
+}
+
+.md-content blockquote {
+    border-inline-start: 3px solid var(--accent);
+}
+
+.post-content code {
+    padding: 0.1em 0.3em;
+    font-size: 0.82em;
+    border-radius: 4px;
+}
+
+.post-content pre code {
+    font-size: 0.78em;
+}
+
+.md-content table {
+    font-size: 16px;
+}
+
+.md-content table th {
+    background: var(--code-bg);
+    font-weight: 600;
+}
+
+/* Markdown requires a header row, so key/value tables carry an empty one. */
+.md-content thead:not(:has(th:not(:empty))) {
+    display: none;
+}
+
+.md-content hr {
+    height: 1px;
+    background: var(--border);
+}
+
+.home-tags a,
+.post-tags a,
+.terms-tags a {
+    padding: 0 12px;
+    color: var(--secondary);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: normal;
+    line-height: 30px;
+    text-transform: lowercase;
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+}
+
+.home-tags a:hover,
+.post-tags a:hover,
+.terms-tags a:hover {
+    color: var(--accent);
+    background: var(--accent-soft);
+    border-color: transparent;
+}
+
+.home-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 28px;
+}
+
+.home-tags span {
+    margin-inline-start: 6px;
+    opacity: 0.6;
+}
+
+.terms-tags sup {
+    font-size: inherit;
+    vertical-align: baseline;
+}
+
+.terms-tags a > sup {
+    opacity: 0.6;
+}
+
+.terms-tags strong {
+    font-weight: inherit;
+}
+
+.home-tags .home-tags-all {
+    border-color: transparent;
+    text-transform: none;
+}
+
+.paginav a:hover {
+    background: var(--accent-soft);
+}
+
+.searchbox input:focus {
+    border-color: var(--accent);
+}
+
+@media screen and (max-width: 768px) {
+    .post-title {
+        font-size: 30px;
+    }
+
+    .md-content h2 {
+        font-size: 24px;
+    }
+
+    .home-info {
+        margin: 32px 0 16px;
+    }
+
+    .home-tags {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        scrollbar-width: none;
+        margin-inline: calc(var(--gap) * -1);
+        padding-inline: var(--gap);
+    }
+
+    .home-tags a {
+        flex: none;
+    }
+
+    .home-tags .home-tags-all {
+        display: none;
+    }
+}

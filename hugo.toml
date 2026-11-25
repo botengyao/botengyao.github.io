@@ -19,6 +19,7 @@ pagination.pagerSize = 10
   title = "Boteng Yao"
   description = "Boteng Yao's blog"
   author = "Boteng Yao"
+  DateFormat = "2006-01-02"
   defaultTheme = "auto"
   disableThemeToggle = false
 
@@ -37,6 +38,12 @@ pagination.pagerSize = 10
   hideSummary = false
   showtoc = true
   tocopen = false
+
+  # Tags in the home page bar, in display order.
+  homeTags = [
+    "envoy", "ai-agents", "infrastructure", "kubernetes", "ai-gateway",
+    "architecture", "cpp", "distributed-systems", "performance", "tls",
+  ]
 
   # Comments via GitHub Discussions (giscus). Requires the giscus GitHub App
   # to be installed on the repo: https://github.com/apps/giscus
